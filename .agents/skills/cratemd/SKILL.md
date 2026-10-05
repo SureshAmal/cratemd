@@ -7,270 +7,273 @@ description: >-
 
 # cratemd: Offline Rust Crate & Workspace Intelligence
 
-`cratemd` provides instant, 100% offline intelligence for any Rust crate cached in Cargo (`~/.cargo/registry/src`), git checkouts, or local multi-crate workspaces.
+`cratemd` provides instant, 100% offline intelligence for any Rust crate cached in Cargo (`~/.cargo/registry/src`), git checkouts, local crates, or multi-crate workspaces.
 
-Instead of burning tokens reading multiple `.rs` files or guessing API signatures, use `cratemd` to fetch clean, token-efficient summaries, search symbols, inspect definitions, and explore multi-crate workspaces in milliseconds (~2ms via persistent cache).
-
----
-
-## When to Use This Skill
-
-Activate and use this skill when:
-- You need to understand a multi-crate Cargo workspace, its member crates, and their dependencies (`cratemd workspace`).
-- You need to know which dependencies are used in a project and whether they are ready offline (`cratemd deps`).
-- You need to find a symbol or function across both local workspace crates and external dependencies (`cratemd find <query>`).
-- You need an ultra-condensed ~500-token cheat sheet for a crate (`cratemd cheat <crate>`).
-- You need runnable code examples from docs and example directories (`cratemd examples <crate>`).
-- You need to search by return type or parameter type (e.g. `--returns Result`, `--takes Stream`).
-- You need the exact method signatures, types, or trait definitions from a crate without reading dozens of raw files (`cratemd view <crate> <symbol>`).
+Instead of burning context tokens reading massive `.rs` files or guessing API signatures, use `cratemd` to fetch clean, token-efficient outlines, search symbols, inspect definitions, and explore multi-crate workspaces in milliseconds.
 
 ---
 
-## Core Workflows
+## Invocation Modes
 
-### 1. Multi-Crate Workspace Architecture
+`cratemd` supports two primary execution modes:
 
-To understand the architecture and inter-crate dependency relationships of any workspace:
+1. **MCP Tools (Primary / Recommended)**: When running in an environment with the `cratemd` MCP server active (such as Antigravity / Gemini), invoke the direct MCP tools (`cratemd_*`). MCP tools execute directly in-process with structured arguments and zero subshell overhead.
+2. **CLI Binary (Fallback / Shell)**: In standard terminal shells, subagents without MCP access, or standalone scripts, run the `cratemd` binary directly via shell commands (`cratemd <subcommand>`).
+
+---
+
+## Token Conservation Playbook for AI Agents
+
+To maximize context efficiency and prevent context window exhaustion, follow these rules:
+
+1. **Never read a raw `.rs` file with `read_file` or `cat` without first checking `cratemd_file`**:
+   - `cratemd_file` extracts structs, enums, traits, functions, methods, doc summaries, and exact line ranges (`L14-L26`).
+   - Saves 70% to 90% in tokens compared to reading the full file.
+   - Once you locate the specific line range needed, read only those exact lines.
+2. **Start with `cratemd_cheat` instead of `cratemd_doc`**:
+   - `cratemd_cheat` yields an ultra-condensed ~500-token summary of key types and functions.
+   - Only call `cratemd_doc` when you genuinely require full API documentation for the entire crate.
+3. **Use `cratemd_view` for surgical symbol lookups**:
+   - When you need a specific method signature, field list, or doc example, query `cratemd_view` with the symbol name instead of grepping source files.
+4. **Use `cratemd_impls` to see trait implementations**:
+   - Quickly find what traits a struct implements (e.g. `Serialize`, `Stream`, `Service`) or what types implement a given trait.
+5. **Use `cratemd_tokens` before querying large crates**:
+   - Inspect the token footprint beforehand to verify how much context space the crate docs require.
+
+---
+
+## Tool Reference & Workflows
+
+### 1. Single File Read & Analysis
+Outline an individual `.rs` file to see all types, functions, methods, docstrings, and line ranges.
+
+- **MCP Tool**:
+  ```json
+  cratemd_file({ "path": "src/analyzer.rs" })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd file src/analyzer.rs
+  # Or shorthand
+  cratemd src/analyzer.rs
+  ```
+
+---
+
+### 2. Multi-Crate Workspace Architecture
+Inspect member crates, intra-workspace dependencies, and crate hierarchy graphs.
+
+- **MCP Tool**:
+  ```json
+  cratemd_workspace({})
+  cratemd_workspace({ "path": "/path/to/project" })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd workspace
+  cratemd workspace /path/to/project
+  ```
+
+---
+
+### 3. Project & Workspace Dependencies
+List resolved dependencies from `Cargo.lock` with versions, usage counts, and offline cache status.
+
+- **MCP Tool**:
+  ```json
+  cratemd_deps({})
+  cratemd_deps({ "target": "/path/to/project" })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd deps
+  cratemd deps /path/to/project
+  ```
+
+---
+
+### 4. Cross-Project Search
+Search symbols simultaneously across local workspace crates and all external dependencies.
+
+- **MCP Tool**:
+  ```json
+  cratemd_find({ "query": "process_frame", "limit": 20 })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd find process_frame
+  cratemd find process_frame -w        # workspace only
+  cratemd find process_frame -d        # dependencies only
+  cratemd find --returns Result        # filter by return type
+  cratemd find --takes TcpStream       # filter by parameter type
+  ```
+
+---
+
+### 5. Ultra-Condensed Crate Cheat Sheet (~500 Tokens)
+Get a compact summary of core structs, enums, traits, and functions for any crate.
+
+- **MCP Tool**:
+  ```json
+  cratemd_cheat({ "crate_name": "tokio" })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd cheat tokio
+  ```
+
+---
+
+### 6. Symbol & Method Search in a Single Crate
+Search for symbols, methods, or docstrings within a specific crate.
+
+- **MCP Tool**:
+  ```json
+  cratemd_search({ "crate_name": "axum", "query": "Router" })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd search axum Router
+  cratemd search axum Router --kind struct
+  cratemd search axum --returns Result
+  cratemd search axum --takes Request
+  cratemd search axum Router --doc
+  ```
+
+---
+
+### 7. Inspect Specific Symbol in Detail
+View full declarations, trait implementations, methods, and documentation for a single item.
+
+- **MCP Tool**:
+  ```json
+  cratemd_view({ "crate_name": "sonora", "symbol": "AudioProcessing::process_capture_i16" })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd view sonora "AudioProcessing::process_capture_i16"
+  ```
+
+---
+
+### 8. Trait Implementations Query
+Inspect all trait implementations in a crate or find implementors of a specific trait or type.
+
+- **MCP Tool**:
+  ```json
+  cratemd_impls({ "crate_name": "serde", "query": "Serialize" })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd impls serde
+  cratemd impls serde Serialize
+  ```
+
+---
+
+### 9. Workspace Cross-References
+Locate all call sites, imports, and usages of a symbol across all member crates.
+
+- **MCP Tool**:
+  ```json
+  cratemd_refs({ "symbol": "parse_config", "limit": 50 })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd refs parse_config
+  cratemd refs parse_config --path /path/to/workspace
+  ```
+
+---
+
+### 10. Cargo Features & Feature Gates
+Inspect crate feature flags, default feature sets, and feature-gated symbols.
+
+- **MCP Tool**:
+  ```json
+  cratemd_features({ "crate_name": "tokio" })
+  cratemd_features({ "crate_name": "tokio", "feature": "full" })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd features tokio
+  cratemd features tokio --feature full
+  ```
+
+---
+
+### 11. Dependency Health & Version Split Audit
+Audit project dependencies for duplicate version splits and verify local cache readiness.
+
+- **MCP Tool**:
+  ```json
+  cratemd_audit({})
+  cratemd_audit({ "target": "/path/to/project" })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd audit
+  ```
+
+---
+
+### 12. Full Crate Documentation
+Generate single-document documentation for a crate (summarized or full).
+
+- **MCP Tool**:
+  ```json
+  cratemd_doc({ "crate_name": "clap", "full": false })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd doc clap
+  cratemd doc clap --full --out /path/to/clap_docs.md
+  ```
+
+---
+
+### 13. Token Footprint & Context Impact
+Measure token counts across cheat sheets, outlines, and documentation before querying.
+
+- **MCP Tool**:
+  ```json
+  cratemd_tokens({ "target": "tokio" })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd tokens tokio
+  cratemd tokens /path/to/workspace
+  cratemd cheat tokio --max-tokens 500
+  ```
+
+---
+
+### 14. Additional CLI Utilities
+The CLI supports specialized indexing utilities:
 
 ```bash
-# In current workspace root
-cratemd workspace
+# Hierarchical module tree
+cratemd outline <crate_name> [--max-depth N]
 
-# Or targeting a specific path
-cratemd workspace /path/to/project
-```
+# Universal Ctags generation
+cratemd ctags <crate_name> [--out tags]
 
-Outputs:
-- Member crates overview and relative paths
-- Internal workspace dependencies and external dependency counts
-- ASCII dependency hierarchy graph (e.g. `api -> core`, `cli -> core`)
+# Tree-sitter AST syntax outline or S-expressions
+cratemd treesitter <crate_name> [relative/path/to/file.rs] [--sexp]
 
----
+# Extract runnable code examples from docs and examples/
+cratemd examples <crate_name> [keyword]
 
-### 2. Inspect Project & Workspace Dependencies
-
-To inspect all dependencies, exact resolved versions from `Cargo.lock`, and offline readiness:
-
-```bash
-# In current project or workspace root
-cratemd deps
-
-# Or targeting a specific path
-cratemd deps /path/to/project
-```
-
-Outputs a clean Markdown table with:
-- Dependency name and resolved version
-- Offline cache status (`ready` / `missing`)
-- Member crates using each dependency
-- One-line description
-
----
-
-### 3. Unified Cross-Project Search (`cratemd find`)
-
-Search across ALL workspace member crates and external dependencies simultaneously:
-
-```bash
-# Search across workspace code and external dependencies
-cratemd find <query>
-
-# Search only within local workspace members
-cratemd find <query> -w
-
-# Search only within external dependencies
-cratemd find <query> -d
-
-# Filter functions by return type
-cratemd find --returns Result
-
-# Filter functions by parameter type
-cratemd find --takes TcpStream
-
-# Restrict search to a specific crate
-cratemd find <query> -c <crate_name>
-```
-
-Results rank local workspace code first, tagged with `[workspace: <crate>]` or `[dep: <crate> v<ver>]`, along with exact file path and line numbers.
-
----
-
-### 4. Ultra-Condensed Crate Cheat Sheet (~500 tokens)
-
-When you need an immediate, high-density summary of key structs, enums, traits, and functions without reading a full documentation manual:
-
-```bash
-cratemd cheat <crate_name>
-```
-
----
-
-### 5. Extract Code Examples
-
-Extract runnable code snippets from documentation comments and the `examples/` directory:
-
-```bash
-# All examples in a crate
-cratemd examples <crate_name>
-
-# Filter examples by keyword
-cratemd examples <crate_name> <keyword>
-```
-
----
-
-### 6. Single-Crate Overview & Full Docs
-
-To generate full documentation for a single crate:
-
-```bash
-cratemd doc <crate_name>
-cratemd doc <crate_name> --full --out <output_path.md>
-```
-
----
-
-### 7. Fast Symbol & Method Search in a Single Crate
-
-```bash
-# Search by symbol name or keyword
-cratemd search <crate_name> <query>
-
-# Filter by kind (fn, struct, enum, trait, method, type, macro)
-cratemd search <crate_name> <query> --kind <kind>
-
-# Search by return or argument type
-cratemd search <crate_name> --returns Result
-cratemd search <crate_name> --takes Context
-
-# Include doc comments
-cratemd search <crate_name> <query> --doc
-```
-
----
-
-### 8. Inspect a Specific Type, Trait, or Function in Detail
-
-```bash
-cratemd view <crate_name> <symbol_or_path>
-```
-
-Shows:
-- Full declaration and visibility
-- Implemented traits (both derived and explicit `impl Trait for Type`)
-- All methods with signatures and documentation
-- Doc examples
-
----
-
-### 9. Single File Read & Analysis (`cratemd file`)
-
-When you only need to inspect a single `.rs` file without indexing an entire crate, `cratemd` provides a token-efficient symbol outline with line numbers:
-
-```bash
-# Analyze a single Rust source file
-cratemd file src/analyzer.rs
-
-# Or shorthand directly
-cratemd src/analyzer.rs
-```
-
-Outputs:
-- Total lines of code and estimated tokens
-- Exact line ranges (`L14-L26`) for every struct, enum, trait, function, and impl block
-- Method outlines, fields, and docstrings
-- Token savings typically exceeding 70-90% compared to reading the raw file
-
----
-
-### 10. Cargo Features & Feature-Gates (`cratemd features`)
-
-Inspect feature flags, default enabled features, and feature-gated symbols:
-
-```bash
-# Overview of all features in a crate
-cratemd features <crate_name>
-
-# Inspect symbols enabled by a specific feature
-cratemd features <crate_name> --feature <feature_name>
-```
-
----
-
-### 11. Trait Implementations Query (`cratemd impls`)
-
-Find all implementors of a trait or all traits implemented for a type:
-
-```bash
-# Query all implementations in a crate
-cratemd impls <crate_name>
-
-# Find implementors of a specific trait or type
-cratemd impls <crate_name> <TypeOrTrait>
-```
-
----
-
-### 12. Workspace Cross-References (`cratemd refs`)
-
-Find all usages and references of a symbol across all member crates in a workspace:
-
-```bash
-# Find references to a function, struct, or type across the workspace
-cratemd refs <symbol_name>
-
-# Target a specific workspace root
-cratemd refs <symbol_name> --path /path/to/workspace
-```
-
----
-
-### 13. Dependency Health & Split Audit (`cratemd audit`)
-
-Audit project dependencies for duplicate version splits and offline cache readiness:
-
-```bash
-# Audit current project dependencies
-cratemd audit
-```
-
----
-
-### 14. Pre-Warm Local Cache (`cratemd warm`)
-
-Pre-parse and index dependencies in the background for zero-latency queries:
-
-```bash
-# Pre-warm all dependencies in the workspace
+# Pre-warm local cache for zero-latency queries
 cratemd warm --all
 ```
 
 ---
 
-### 15. Built-in Model Context Protocol (MCP) Server (`cratemd mcp`)
+## MCP Server Configuration
 
-`cratemd` has a native, zero-overhead MCP server communicating over standard IO (`stdio`) using JSON-RPC 2.0. Any AI agent or IDE (Antigravity, Claude Desktop, Cursor, Zed) can configure `cratemd` directly as an MCP tool provider:
+When configuring `cratemd` in other tools or IDEs, add the following to `mcp_config.json`:
 
-```bash
-cratemd mcp
-```
-
-#### Supported MCP Tools:
-- `cratemd_doc`: Generate LLM-optimized single-document documentation.
-- `cratemd_cheat`: Ultra-condensed ~500-token cheat sheet.
-- `cratemd_search`: Search symbols, signatures, and docstrings.
-- `cratemd_view`: Detailed inspection of a specific symbol with exact signatures and methods.
-- `cratemd_file`: Read and analyze a single `.rs` file with line ranges and token savings.
-- `cratemd_find`: Cross-search symbols across workspace members and external dependencies.
-- `cratemd_features`: Inspect Cargo features and feature-gated code.
-- `cratemd_impls`: Query trait implementations and reverse lookups.
-- `cratemd_refs`: Find symbol references across workspace members.
-- `cratemd_audit`: Audit dependencies for duplicate version splits and cache readiness.
-- `cratemd_deps`: Inspect dependencies and offline readiness.
-- `cratemd_workspace`: Inspect workspace architecture and hierarchy.
-- `cratemd_tokens`: Measure token footprint and context impact.
-
-#### Sample MCP Client Configuration:
 ```json
 {
   "mcpServers": {
@@ -281,53 +284,3 @@ cratemd mcp
   }
 }
 ```
-
----
-
-### 16. Module Outline, Ctags & Tree-sitter
-
-```bash
-# Hierarchical module tree
-cratemd outline <crate_name> [--max-depth N]
-
-# Generate Universal Ctags
-cratemd ctags <crate_name> [--out tags]
-
-# Tree-sitter AST syntax outline or S-expressions
-cratemd treesitter <crate_name> [relative/path/to/file.rs] [--sexp]
-```
-
----
-
-### 17. Token Footprint & Context Protection
-
-Measure context footprint and enforce strict token budgets to prevent LLM context exhaustion:
-
-```bash
-# Analyze context footprint and view token size across cheat sheet, outline, and docs
-cratemd tokens <crate_name>
-
-# Workspace context impact report
-cratemd tokens /path/to/workspace
-
-# Enforce a maximum token budget on any command (truncates safely at line boundaries)
-cratemd <crate_name> --max-tokens 1500
-cratemd search <crate_name> <query> --max-tokens 500
-
-# Display estimated tokens appended to output
-cratemd cheat <crate_name> --tokens
-```
-
----
-
-## Guidelines for LLM Agents
-
-1. **Start with `cratemd workspace` or `cratemd deps`** when exploring a new repository or workspace to grasp project boundaries and library dependencies in seconds.
-2. **For individual files, use `cratemd src/foo.rs`** to get an outline with exact line numbers before reading raw lines, saving up to 90% in tokens.
-3. **Check context footprint with `cratemd tokens <crate>`** before dumping large documentation sets into your context.
-4. **Prefer `cratemd cheat <crate>` (~500 tokens)** over full documentation dumps to preserve context space.
-5. **Use `--max-tokens <N>`** whenever you need to ensure output stays within a strict budget.
-6. **Use `cratemd find <query>`** to search for functionality across the entire project and dependencies simultaneously before writing duplicate code.
-7. **Use `cratemd view <crate> <symbol>`** to ensure accurate method signatures and trait implementations before calling them in Rust.
-8. **Add `--json`** whenever automated parsing is needed.
-9. **Use `cratemd mcp`** when configuring agent tool environments for direct tool calling.
