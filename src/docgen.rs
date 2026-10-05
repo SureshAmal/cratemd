@@ -1,4 +1,5 @@
 use std::fmt::Write;
+use crate::analyzer::clean_rust_syntax;
 use crate::model::{CrateIndex, ModuleNode, Symbol, SymbolKind};
 
 pub struct DocGenerator;
@@ -178,7 +179,7 @@ impl DocGenerator {
                     String::new()
                 };
 
-                let _ = writeln!(out, "{}{}{}", s.signature, impls_hint, method_hint);
+                let _ = writeln!(out, "{}{}{}", clean_rust_syntax(&s.signature), impls_hint, method_hint);
             }
             let _ = writeln!(out, "```\n");
         }
@@ -193,7 +194,7 @@ impl DocGenerator {
             let _ = writeln!(out, "### Key Traits");
             let _ = writeln!(out, "```rust");
             for t in traits {
-                let _ = writeln!(out, "{}", t.signature);
+                let _ = writeln!(out, "{}", clean_rust_syntax(&t.signature));
             }
             let _ = writeln!(out, "```\n");
         }
@@ -208,7 +209,7 @@ impl DocGenerator {
             let _ = writeln!(out, "### Functions");
             let _ = writeln!(out, "```rust");
             for f in fns {
-                let _ = writeln!(out, "{}", f.signature);
+                let _ = writeln!(out, "{}", clean_rust_syntax(&f.signature));
             }
             let _ = writeln!(out, "```\n");
         }
@@ -231,11 +232,13 @@ impl DocGenerator {
         }
         let _ = writeln!(out);
 
+        let clean_sig = clean_rust_syntax(&sym.signature);
         let _ = writeln!(out, "```rust");
         if let Some(ref detail) = sym.detail {
-            let _ = writeln!(out, "{} {}", sym.signature.trim_end_matches(';'), detail);
+            let clean_detail = clean_rust_syntax(detail);
+            let _ = writeln!(out, "{} {}", clean_sig.trim_end_matches(';'), clean_detail);
         } else {
-            let _ = writeln!(out, "{}", sym.signature);
+            let _ = writeln!(out, "{}", clean_sig);
         }
         let _ = writeln!(out, "```\n");
 
@@ -245,17 +248,20 @@ impl DocGenerator {
         }
 
         if !sym.methods.is_empty() {
-            let _ = writeln!(out, "## Methods & Associated Items\n");
+            let _ = writeln!(out, "## Methods ({})\n", sym.methods.len());
+            let _ = writeln!(out, "```rust");
+            let _ = writeln!(out, "impl {} {{", sym.name);
             for m in &sym.methods {
-                let _ = writeln!(out, "### `{}`\n", m.name);
-                let _ = writeln!(out, "```rust\n{}\n```", m.signature);
+                let m_sig = clean_rust_syntax(&m.signature);
                 if !m.doc.is_empty() {
-                    let first_line = m.doc.lines().next().unwrap_or("");
-                    let _ = writeln!(out, "{}\n", first_line);
-                } else {
-                    let _ = writeln!(out);
+                    let first_line = m.doc.lines().next().unwrap_or("").trim();
+                    if !first_line.is_empty() {
+                        let _ = writeln!(out, "    /// {}", first_line);
+                    }
                 }
+                let _ = writeln!(out, "    {}", m_sig);
             }
+            let _ = writeln!(out, "}}\n```\n");
         }
 
         if !sym.examples.is_empty() {
@@ -329,17 +335,19 @@ fn render_symbol_markdown(sym: &Symbol, full: bool, out: &mut String) {
         let _ = writeln!(out, "**Implements:** `{}`\n", sym.trait_impls.join("`, `"));
     }
 
+    let clean_sig = clean_rust_syntax(&sym.signature);
     let _ = writeln!(out, "```rust");
     if let Some(ref detail) = sym.detail {
+        let clean_det = clean_rust_syntax(detail);
         if full || detail.lines().count() <= 10 {
-            let _ = writeln!(out, "{} {}", sym.signature.trim_end_matches(';'), detail);
+            let _ = writeln!(out, "{} {}", clean_sig.trim_end_matches(';'), clean_det);
         } else {
             // Truncate long bodies in compact mode
-            let lines: Vec<&str> = detail.lines().take(8).collect();
-            let _ = writeln!(out, "{} {}\n  // ... ({} more items)\n}}", sym.signature.trim_end_matches(';'), lines.join("\n"), detail.lines().count() - 8);
+            let lines: Vec<&str> = clean_det.lines().take(8).collect();
+            let _ = writeln!(out, "{} {}\n  // ... ({} more items)\n}}", clean_sig.trim_end_matches(';'), lines.join("\n"), detail.lines().count() - 8);
         }
     } else {
-        let _ = writeln!(out, "{}", sym.signature);
+        let _ = writeln!(out, "{}", clean_sig);
     }
     let _ = writeln!(out, "```");
 
@@ -360,11 +368,11 @@ fn render_symbol_markdown(sym: &Symbol, full: bool, out: &mut String) {
         let _ = writeln!(out, "```rust");
         if full || sym.methods.len() <= 10 {
             for m in &sym.methods {
-                let _ = writeln!(out, "{}", m.signature);
+                let _ = writeln!(out, "{}", clean_rust_syntax(&m.signature));
             }
         } else {
             for m in sym.methods.iter().take(10) {
-                let _ = writeln!(out, "{}", m.signature);
+                let _ = writeln!(out, "{}", clean_rust_syntax(&m.signature));
             }
             let _ = writeln!(out, "  // ... ({} more methods. Use 'cratemd view <crate> {}' for full detail)", sym.methods.len() - 10, sym.name);
         }

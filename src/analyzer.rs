@@ -373,7 +373,7 @@ impl CrateAnalyzer {
                     .iter()
                     .map(|f| {
                         let f_name = f.ident.as_ref().map(|i| i.to_string()).unwrap_or_default();
-                        let f_ty = f.ty.to_token_stream().to_string();
+                        let f_ty = clean_rust_syntax(&f.ty.to_token_stream().to_string());
                         let f_vis = parse_visibility(&f.vis);
                         format!("{} {}: {}", f_vis.as_str(), f_name, f_ty)
                     })
@@ -384,14 +384,14 @@ impl CrateAnalyzer {
                 let types: Vec<String> = unnamed
                     .unnamed
                     .iter()
-                    .map(|f| f.ty.to_token_stream().to_string())
+                    .map(|f| clean_rust_syntax(&f.ty.to_token_stream().to_string()))
                     .collect();
                 Some(format!("({});", types.join(", ")))
             }
             Fields::Unit => Some(";".to_string()),
         };
 
-        let signature = format!("{}struct {}{}", vis_prefix(vis), name, generics_str);
+        let signature = clean_rust_syntax(&format!("{}struct {}{}", vis_prefix(vis), name, generics_str));
         let derives = extract_derives(&s.attrs);
         let examples = extract_examples_from_doc(&doc, &name);
 
@@ -437,7 +437,7 @@ impl CrateAnalyzer {
                                 format!(
                                     "{}: {}",
                                     f.ident.as_ref().unwrap(),
-                                    f.ty.to_token_stream()
+                                    clean_rust_syntax(&f.ty.to_token_stream().to_string())
                                 )
                             })
                             .collect();
@@ -447,7 +447,7 @@ impl CrateAnalyzer {
                         let flds: Vec<String> = unnamed
                             .unnamed
                             .iter()
-                            .map(|f| f.ty.to_token_stream().to_string())
+                            .map(|f| clean_rust_syntax(&f.ty.to_token_stream().to_string()))
                             .collect();
                         format!("({})", flds.join(", "))
                     }
@@ -462,7 +462,7 @@ impl CrateAnalyzer {
             .collect();
 
         let detail = Some(format!("{{\n  {}\n}}", variants.join(",\n  ")));
-        let signature = format!("{}enum {}{}", vis_prefix(vis), name, generics_str);
+        let signature = clean_rust_syntax(&format!("{}enum {}{}", vis_prefix(vis), name, generics_str));
         let derives = extract_derives(&e.attrs);
         let examples = extract_examples_from_doc(&doc, &name);
 
@@ -494,7 +494,7 @@ impl CrateAnalyzer {
         let span = t.span();
 
         let supertraits = if !t.supertraits.is_empty() {
-            format!(": {}", t.supertraits.to_token_stream())
+            format!(": {}", clean_rust_syntax(&t.supertraits.to_token_stream().to_string()))
         } else {
             String::new()
         };
@@ -516,7 +516,7 @@ impl CrateAnalyzer {
                 TraitItem::Type(ty) => {
                     let ty_name = ty.ident.to_string();
                     let bounds = if !ty.bounds.is_empty() {
-                        format!(": {}", ty.bounds.to_token_stream())
+                        format!(": {}", clean_rust_syntax(&ty.bounds.to_token_stream().to_string()))
                     } else {
                         String::new()
                     };
@@ -524,7 +524,7 @@ impl CrateAnalyzer {
                 }
                 TraitItem::Const(c) => {
                     let c_name = c.ident.to_string();
-                    let c_ty = c.ty.to_token_stream().to_string();
+                    let c_ty = clean_rust_syntax(&c.ty.to_token_stream().to_string());
                     trait_items.push(format!("  const {}: {};", c_name, c_ty));
                 }
                 _ => {}
@@ -532,7 +532,7 @@ impl CrateAnalyzer {
         }
 
         let detail = Some(format!("{{\n{}\n}}", trait_items.join("\n")));
-        let signature = format!("{}trait {}{}{}", vis_prefix(vis), name, generics_str, supertraits);
+        let signature = clean_rust_syntax(&format!("{}trait {}{}{}", vis_prefix(vis), name, generics_str, supertraits));
         let examples = extract_examples_from_doc(&doc, &name);
 
         Symbol {
@@ -559,7 +559,7 @@ impl CrateAnalyzer {
         let full_id = format!("{}::{}", mod_path, name);
         let vis = parse_visibility(&f.vis);
         let doc = extract_docs(&f.attrs);
-        let signature = format!("{}{};", vis_prefix(vis), format_signature(&f.sig));
+        let signature = clean_rust_syntax(&format!("{}{};", vis_prefix(vis), format_signature(&f.sig)));
         let span = f.span();
         let examples = extract_examples_from_doc(&doc, &name);
 
@@ -588,8 +588,8 @@ impl CrateAnalyzer {
         let vis = parse_visibility(&t.vis);
         let doc = extract_docs(&t.attrs);
         let generics_str = format_generics(&t.generics);
-        let target_ty = t.ty.to_token_stream().to_string();
-        let signature = format!("{}type {}{} = {};", vis_prefix(vis), name, generics_str, target_ty);
+        let target_ty = clean_rust_syntax(&t.ty.to_token_stream().to_string());
+        let signature = clean_rust_syntax(&format!("{}type {}{} = {};", vis_prefix(vis), name, generics_str, target_ty));
         let span = t.span();
         let examples = extract_examples_from_doc(&doc, &name);
 
@@ -617,8 +617,8 @@ impl CrateAnalyzer {
         let full_id = format!("{}::{}", mod_path, name);
         let vis = parse_visibility(&c.vis);
         let doc = extract_docs(&c.attrs);
-        let ty_str = c.ty.to_token_stream().to_string();
-        let signature = format!("{}const {}: {};", vis_prefix(vis), name, ty_str);
+        let ty_str = clean_rust_syntax(&c.ty.to_token_stream().to_string());
+        let signature = clean_rust_syntax(&format!("{}const {}: {};", vis_prefix(vis), name, ty_str));
         let span = c.span();
         let examples = extract_examples_from_doc(&doc, &name);
 
@@ -646,12 +646,12 @@ impl CrateAnalyzer {
         let full_id = format!("{}::{}", mod_path, name);
         let vis = parse_visibility(&st.vis);
         let doc = extract_docs(&st.attrs);
-        let ty_str = st.ty.to_token_stream().to_string();
+        let ty_str = clean_rust_syntax(&st.ty.to_token_stream().to_string());
         let mut_str = match &st.mutability {
             syn::StaticMutability::Mut(_) => "mut ",
             _ => "",
         };
-        let signature = format!("{}static {}{}: {};", vis_prefix(vis), mut_str, name, ty_str);
+        let signature = clean_rust_syntax(&format!("{}static {}{}: {};", vis_prefix(vis), mut_str, name, ty_str));
         let span = st.span();
         let examples = extract_examples_from_doc(&doc, &name);
 
@@ -749,10 +749,10 @@ impl CrateAnalyzer {
     ) -> Vec<Symbol> {
         let mut symbols = Vec::new();
         let target_name = get_type_name(&imp.self_ty);
-        let trait_name = imp.trait_.as_ref().map(|(path, _)| path.to_token_stream().to_string());
+        let trait_name = imp.trait_.as_ref().map(|(path, _)| clean_rust_syntax(&path.to_token_stream().to_string()));
 
         if let Some(ref t_name) = trait_name {
-            let impl_name = format!("impl {} for {}", t_name, target_name);
+            let impl_name = clean_rust_syntax(&format!("impl {} for {}", t_name, target_name));
             let full_id = format!("{}::impl_{}_for_{}", mod_path, t_name.replace(" ", "_"), target_name);
             let span = imp.span();
             symbols.push(Symbol {
@@ -783,7 +783,7 @@ impl CrateAnalyzer {
                 let full_id = format!("{}::{}::{}", mod_path, target_name, m_name);
                 let span = m.span();
 
-                let sig_str = format!("{}{};", vis_prefix(m_vis), format_signature(&m.sig));
+                let sig_str = clean_rust_syntax(&format!("{}{};", vis_prefix(m_vis), format_signature(&m.sig)));
                 let detail = trait_name.as_ref().map(|t| format!("implements {}", t));
                 let examples = extract_examples_from_doc(&m_doc, &m_name);
 
@@ -1069,29 +1069,130 @@ fn format_signature(sig: &Signature) -> String {
     let generics = format_generics(&sig.generics);
 
     let inputs: Vec<String> = sig.inputs.iter().map(|arg| match arg {
-        FnArg::Receiver(r) => r.to_token_stream().to_string(),
+        FnArg::Receiver(r) => clean_rust_syntax(&r.to_token_stream().to_string()),
         FnArg::Typed(t) => {
-            let pat = t.pat.to_token_stream().to_string();
-            let ty = t.ty.to_token_stream().to_string();
+            let pat = clean_rust_syntax(&t.pat.to_token_stream().to_string());
+            let ty = clean_rust_syntax(&t.ty.to_token_stream().to_string());
             format!("{}: {}", pat, ty)
         }
     }).collect();
 
     let output = match &sig.output {
         ReturnType::Default => String::new(),
-        ReturnType::Type(_, ty) => format!(" -> {}", ty.to_token_stream()),
+        ReturnType::Type(_, ty) => format!(" -> {}", clean_rust_syntax(&ty.to_token_stream().to_string())),
     };
 
     let where_clause = if let Some(wh) = &sig.generics.where_clause {
-        format!(" {}", wh.to_token_stream())
+        format!(" {}", clean_rust_syntax(&wh.to_token_stream().to_string()))
     } else {
         String::new()
     };
 
     let prefix = parts.join(" ");
-    format!("{} {}{}({}){}{}", prefix, name, generics, inputs.join(", "), output, where_clause)
+    clean_rust_syntax(&format!("{} {}{}({}){}{}", prefix, name, generics, inputs.join(", "), output, where_clause))
 }
 
 fn mod_name_from_path(mod_path: &str) -> String {
     mod_path.rsplit("::").next().unwrap_or(mod_path).to_string()
+}
+
+/// Cleans raw Syn token stream output into idiomatic, compact Rust syntax,
+/// removing extraneous whitespace around punctuation and generics to save LLM tokens.
+pub fn clean_rust_syntax(input: &str) -> String {
+    let mut s = input.to_string();
+
+    // 1. Path qualifiers and double colons
+    s = s.replace(" :: ", "::");
+    s = s.replace(":: ", "::");
+    s = s.replace(" ::", "::");
+
+    // 2. References, pointers, and mutability
+    s = s.replace("& mut ", "&mut ");
+    s = s.replace("& self", "&self");
+    s = s.replace("& mut self", "&mut self");
+    s = s.replace("* const ", "*const ");
+    s = s.replace("* mut ", "*mut ");
+    s = s.replace("& '", "&'");
+
+    // 3. Generics and angle brackets (<T, U>)
+    s = s.replace(" < ", "<");
+    s = s.replace("< ", "<");
+    s = s.replace(" <", "<");
+    s = s.replace(" >", ">");
+
+    // 4. Slices and arrays
+    s = s.replace("& [", "&[");
+    s = s.replace("&mut [", "&mut [");
+    s = s.replace("[ ", "[");
+    s = s.replace(" ]", "]");
+
+    // 5. Parentheses and argument lists
+    s = s.replace("( ", "(");
+    s = s.replace(" )", ")");
+    s = s.replace("()", "()");
+    s = s.replace(" ()", "()");
+
+    // 6. Commas, colons, and semicolons
+    s = s.replace(" ,", ",");
+    s = s.replace(" ;", ";");
+    s = s.replace(" :", ":");
+
+    // 7. Compact reference to identifiers or types (e.g. `& StreamConfig` -> `&StreamConfig`)
+    let mut cleaned = String::with_capacity(s.len());
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '&'
+            && i + 1 < chars.len()
+            && chars[i + 1] == ' '
+            && i + 2 < chars.len()
+            && (chars[i + 2].is_alphanumeric() || chars[i + 2] == '_' || chars[i + 2] == '[' || chars[i + 2] == '\'')
+        {
+            cleaned.push('&');
+            i += 2;
+            continue;
+        }
+        cleaned.push(chars[i]);
+        i += 1;
+    }
+    s = cleaned;
+
+    // 8. Collapse multiple spaces
+    while s.contains("  ") {
+        s = s.replace("  ", " ");
+    }
+
+    s.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clean_rust_syntax_methods() {
+        let raw = "pub fn process_capture_i16(& mut self, src: & [i16], dest: & mut [i16]) -> Result < () , Error > ;";
+        let cleaned = clean_rust_syntax(raw);
+        assert_eq!(cleaned, "pub fn process_capture_i16(&mut self, src: &[i16], dest: &mut [i16]) -> Result<(), Error>;");
+    }
+
+    #[test]
+    fn test_clean_rust_syntax_types_and_paths() {
+        let raw = "bytes :: bytes_mut :: BytesMut < Option < Vec < u8 > > >";
+        let cleaned = clean_rust_syntax(raw);
+        assert_eq!(cleaned, "bytes::bytes_mut::BytesMut<Option<Vec<u8>>>");
+    }
+
+    #[test]
+    fn test_clean_rust_syntax_refs_and_configs() {
+        let raw = "pub fn process(& mut self, config: & StreamConfig) -> Result < () , Error > ;";
+        let cleaned = clean_rust_syntax(raw);
+        assert_eq!(cleaned, "pub fn process(&mut self, config: &StreamConfig) -> Result<(), Error>;");
+    }
+
+    #[test]
+    fn test_clean_rust_syntax_idempotency() {
+        let expected = "pub fn process_capture_i16(&mut self, src: &[i16], dest: &mut [i16]) -> Result<(), Error>;";
+        assert_eq!(clean_rust_syntax(expected), expected);
+    }
 }

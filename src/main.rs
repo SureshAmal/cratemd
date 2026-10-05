@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 
-use analyzer::CrateAnalyzer;
+use analyzer::{clean_rust_syntax, CrateAnalyzer};
 use cache::CacheManager;
 use cli::{
     CheatArgs, Cli, Commands, CtagsArgs, DepsCliArgs, DocArgs, ExamplesArgs,
@@ -238,22 +238,30 @@ fn handle_search(args: SearchArgs, cli: &Cli, refresh: bool, no_cache: bool) -> 
         let sym = &hit.symbol;
         let kind_badge = format!("[{}]", sym.kind.as_str());
         let vis_str = if sym.visibility.is_public() { "" } else { " (internal)" };
-        let _ = writeln!(out, "{}. {} `{}`{}", i + 1, kind_badge, sym.id, vis_str);
-        let _ = writeln!(out, "   Signature: {}", sym.signature);
+        let clean_sig = clean_rust_syntax(&sym.signature);
+
+        let _ = writeln!(out, "{}. {} `{}`{} ({}:{})", i + 1, kind_badge, sym.id, vis_str, sym.file_path, sym.line_start);
+        let _ = writeln!(out, "   {}", clean_sig);
+
         if !sym.trait_impls.is_empty() {
             let _ = writeln!(out, "   Implements: {}", sym.trait_impls.join(", "));
+        }
+        if !sym.methods.is_empty() {
+            let total = sym.methods.len();
+            let preview: Vec<&str> = sym.methods.iter().take(8).map(|m| m.name.as_str()).collect();
+            let more = if total > 8 {
+                format!(", ... ({} total)", total)
+            } else {
+                String::new()
+            };
+            let _ = writeln!(out, "   Methods: {}{}", preview.join(", "), more);
         }
         if !sym.doc.is_empty() {
             let first_line = sym.doc.lines().next().unwrap_or("").trim();
             if !first_line.is_empty() {
-                let _ = writeln!(out, "   Doc: {}", first_line);
+                let _ = writeln!(out, "   {}", first_line);
             }
         }
-        if !sym.methods.is_empty() {
-            let method_names: Vec<String> = sym.methods.iter().map(|m| m.name.clone()).collect();
-            let _ = writeln!(out, "   Methods ({}): {}", method_names.len(), method_names.join(", "));
-        }
-        let _ = writeln!(out, "   File: {}:{}", sym.file_path, sym.line_start);
         let _ = writeln!(out);
     }
 
@@ -473,22 +481,30 @@ fn handle_find(args: FindCliArgs, cli: &Cli, refresh: bool, no_cache: bool) -> R
         };
         let kind_badge = format!("[{}]", sym.kind.as_str());
         let vis_str = if sym.visibility.is_public() { "" } else { " (internal)" };
-        let _ = writeln!(out, "{}. {} {} `{}`{}", i + 1, badge, kind_badge, sym.id, vis_str);
-        let _ = writeln!(out, "   Signature: {}", sym.signature);
+        let clean_sig = clean_rust_syntax(&sym.signature);
+
+        let _ = writeln!(out, "{}. {} {} `{}`{} ({}:{})", i + 1, badge, kind_badge, sym.id, vis_str, sym.file_path, sym.line_start);
+        let _ = writeln!(out, "   {}", clean_sig);
+
         if !sym.trait_impls.is_empty() {
             let _ = writeln!(out, "   Implements: {}", sym.trait_impls.join(", "));
+        }
+        if !sym.methods.is_empty() {
+            let total = sym.methods.len();
+            let preview: Vec<&str> = sym.methods.iter().take(8).map(|m| m.name.as_str()).collect();
+            let more = if total > 8 {
+                format!(", ... ({} total)", total)
+            } else {
+                String::new()
+            };
+            let _ = writeln!(out, "   Methods: {}{}", preview.join(", "), more);
         }
         if !sym.doc.is_empty() {
             let first_line = sym.doc.lines().next().unwrap_or("").trim();
             if !first_line.is_empty() {
-                let _ = writeln!(out, "   Doc: {}", first_line);
+                let _ = writeln!(out, "   {}", first_line);
             }
         }
-        if !sym.methods.is_empty() {
-            let method_names: Vec<String> = sym.methods.iter().map(|m| m.name.clone()).collect();
-            let _ = writeln!(out, "   Methods ({}): {}", method_names.len(), method_names.join(", "));
-        }
-        let _ = writeln!(out, "   File: {}:{}", sym.file_path, sym.line_start);
         let _ = writeln!(out);
     }
 
