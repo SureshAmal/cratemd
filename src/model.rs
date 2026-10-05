@@ -2,6 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureDef {
+    pub name: String,
+    pub is_default: bool,
+    pub sub_features: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrateInfo {
     pub name: String,
     pub version: String,
@@ -13,6 +20,8 @@ pub struct CrateInfo {
     pub bin_paths: Vec<PathBuf>,
     pub dependencies: Vec<String>,
     pub features: Vec<String>,
+    #[serde(default)]
+    pub feature_defs: Vec<FeatureDef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -115,9 +124,44 @@ pub struct Symbol {
     pub methods: Vec<Symbol>,
     pub trait_impls: Vec<String>,
     pub examples: Vec<CodeExample>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feature: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl Symbol {
+    #[cfg(test)]
+    pub fn new(
+        name: String,
+        id: String,
+        kind: SymbolKind,
+        visibility: Visibility,
+        signature: String,
+        file_path: String,
+        line_start: usize,
+        line_end: usize,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            kind,
+            visibility,
+            module_path: String::new(),
+            file_path,
+            line_start,
+            line_end,
+            signature,
+            doc: String::new(),
+            parent: None,
+            detail: None,
+            methods: Vec::new(),
+            trait_impls: Vec::new(),
+            examples: Vec::new(),
+            feature: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ModuleNode {
     pub name: String,
     pub full_path: String,
@@ -149,24 +193,4 @@ pub struct CrateStats {
     pub macros_count: usize,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DependencyInfo {
-    pub name: String,
-    pub req_version: String,
-    pub resolved_version: Option<String>,
-    pub kind: String, // "normal", "dev", "build"
-    pub description: Option<String>,
-    pub available_offline: bool,
-    pub root_dir: Option<PathBuf>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkspaceMember {
-    pub name: String,
-    pub version: String,
-    pub path: PathBuf,
-    pub description: Option<String>,
-}
 

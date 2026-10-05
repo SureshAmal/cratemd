@@ -81,6 +81,27 @@ pub enum Commands {
 
     /// Analyze token footprint and context window impact of a crate or workspace
     Tokens(TokensCliArgs),
+
+    /// Inspect cargo feature flags, default features, and feature-gated symbols
+    Features(FeaturesArgs),
+
+    /// Query trait implementations and find implementors of traits or types
+    Impls(ImplsArgs),
+
+    /// Find all references and usages of a symbol across workspace crates
+    Refs(RefsArgs),
+
+    /// Audit dependency health, version splits, and offline cache readiness
+    Audit(AuditArgs),
+
+    /// Pre-warm offline disk cache for workspace crates and dependencies
+    Warm(WarmArgs),
+
+    /// Read and analyze a single Rust source file (.rs)
+    File(FileArgs),
+
+    /// Start Model Context Protocol (MCP) server over stdio for LLMs and agents
+    Mcp(McpArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -268,6 +289,63 @@ pub struct TokensCliArgs {
     /// Crate name, directory path, or workspace root (defaults to current directory)
     pub target: Option<String>,
 }
+
+#[derive(Args, Debug, Clone)]
+pub struct FeaturesArgs {
+    /// Name or path of the crate
+    pub crate_name: String,
+
+    /// Inspect a specific feature and list its enabled symbols and dependencies
+    pub feature: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ImplsArgs {
+    /// Name or path of the crate
+    pub crate_name: String,
+
+    /// Trait or struct/enum type name to query implementations for
+    pub query: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct RefsArgs {
+    /// Symbol name or path to search references for across workspace crates
+    pub symbol: String,
+
+    /// Workspace path (defaults to current directory)
+    pub path: Option<PathBuf>,
+
+    /// Maximum number of matching references to return
+    #[arg(short, long, default_value = "50")]
+    pub limit: usize,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AuditArgs {
+    /// Workspace or crate directory path (defaults to current directory)
+    pub target: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct WarmArgs {
+    /// Crate name or path (defaults to current project/workspace members and direct dependencies)
+    pub target: Option<String>,
+
+    /// Also pre-warm transitive dependencies found in Cargo.lock
+    #[arg(long)]
+    pub all: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct FileArgs {
+    /// Path to the .rs file to analyze
+    pub path: PathBuf,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct McpArgs {}
+
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CliSymbolKind {

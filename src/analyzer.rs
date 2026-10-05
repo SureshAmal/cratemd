@@ -411,6 +411,7 @@ impl CrateAnalyzer {
             methods: Vec::new(),
             trait_impls: derives,
             examples,
+            feature: extract_cfg_feature(&s.attrs),
         }
     }
 
@@ -482,6 +483,7 @@ impl CrateAnalyzer {
             methods: Vec::new(),
             trait_impls: derives,
             examples,
+            feature: extract_cfg_feature(&e.attrs),
         }
     }
 
@@ -551,6 +553,7 @@ impl CrateAnalyzer {
             methods: Vec::new(),
             trait_impls: Vec::new(),
             examples,
+            feature: extract_cfg_feature(&t.attrs),
         }
     }
 
@@ -579,6 +582,7 @@ impl CrateAnalyzer {
             methods: Vec::new(),
             trait_impls: Vec::new(),
             examples,
+            feature: extract_cfg_feature(&f.attrs),
         }
     }
 
@@ -609,6 +613,7 @@ impl CrateAnalyzer {
             methods: Vec::new(),
             trait_impls: Vec::new(),
             examples,
+            feature: extract_cfg_feature(&t.attrs),
         }
     }
 
@@ -638,6 +643,7 @@ impl CrateAnalyzer {
             methods: Vec::new(),
             trait_impls: Vec::new(),
             examples,
+            feature: extract_cfg_feature(&c.attrs),
         }
     }
 
@@ -671,6 +677,7 @@ impl CrateAnalyzer {
             methods: Vec::new(),
             trait_impls: Vec::new(),
             examples,
+            feature: extract_cfg_feature(&st.attrs),
         }
     }
 
@@ -698,6 +705,7 @@ impl CrateAnalyzer {
             methods: Vec::new(),
             trait_impls: Vec::new(),
             examples,
+            feature: extract_cfg_feature(&m.attrs),
         })
     }
 
@@ -734,6 +742,7 @@ impl CrateAnalyzer {
                 methods: Vec::new(),
                 trait_impls: Vec::new(),
                 examples: Vec::new(),
+                feature: extract_cfg_feature(&u.attrs),
             });
         }
 
@@ -750,10 +759,11 @@ impl CrateAnalyzer {
         let mut symbols = Vec::new();
         let target_name = get_type_name(&imp.self_ty);
         let trait_name = imp.trait_.as_ref().map(|(path, _)| clean_rust_syntax(&path.to_token_stream().to_string()));
+        let impl_feat = extract_cfg_feature(&imp.attrs);
 
         if let Some(ref t_name) = trait_name {
             let impl_name = clean_rust_syntax(&format!("impl {} for {}", t_name, target_name));
-            let full_id = format!("{}::impl_{}_for_{}", mod_path, t_name.replace(" ", "_"), target_name);
+            let full_id = format!("{}::(impl {} for {})", mod_path, t_name, target_name);
             let span = imp.span();
             symbols.push(Symbol {
                 id: full_id,
@@ -771,6 +781,7 @@ impl CrateAnalyzer {
                 methods: Vec::new(),
                 trait_impls: Vec::new(),
                 examples: Vec::new(),
+                feature: impl_feat.clone(),
             });
         }
 
@@ -786,6 +797,7 @@ impl CrateAnalyzer {
                 let sig_str = clean_rust_syntax(&format!("{}{};", vis_prefix(m_vis), format_signature(&m.sig)));
                 let detail = trait_name.as_ref().map(|t| format!("implements {}", t));
                 let examples = extract_examples_from_doc(&m_doc, &m_name);
+                let m_feat = extract_cfg_feature(&m.attrs).or_else(|| impl_feat.clone());
 
                 symbols.push(Symbol {
                     id: full_id,
@@ -803,6 +815,7 @@ impl CrateAnalyzer {
                     methods: Vec::new(),
                     trait_impls: Vec::new(),
                     examples,
+                    feature: m_feat,
                 });
             }
         }
@@ -1016,7 +1029,7 @@ fn vis_prefix(vis: Visibility) -> &'static str {
     }
 }
 
-fn extract_docs(attrs: &[Attribute]) -> String {
+pub(crate) fn extract_docs(attrs: &[Attribute]) -> String {
     let mut lines = Vec::new();
     for attr in attrs {
         if attr.path().is_ident("doc") {
@@ -1042,6 +1055,29 @@ fn clean_doc_lines(lines: &[String]) -> String {
     trimmed.join("\n").trim().to_string()
 }
 
+fn extract_cfg_feature(attrs: &[Attribute]) -> Option<String> {
+    for attr in attrs {
+        let tokens = attr.to_token_stream().to_string();
+        if tokens.contains("feature = ") || tokens.contains("feature=") {
+            if let Some(start) = tokens.find("feature = \"") {
+                let rest = &tokens[start + 11..];
+                if let Some(end) = rest.find('"') {
+                    return Some(rest[..end].to_string());
+                }
+            } else if let Some(start) = tokens.find("feature =") {
+                let rest = &tokens[start + 9..].trim_start();
+                if rest.starts_with('"') {
+                    let rest = &rest[1..];
+                    if let Some(end) = rest.find('"') {
+                        return Some(rest[..end].to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 fn format_generics(generics: &Generics) -> String {
     if generics.params.is_empty() {
         String::new()
@@ -1051,7 +1087,7 @@ fn format_generics(generics: &Generics) -> String {
     }
 }
 
-fn format_signature(sig: &Signature) -> String {
+pub(crate) fn format_signature(sig: &Signature) -> String {
     let mut parts = Vec::new();
     if sig.constness.is_some() {
         parts.push("const");
@@ -1136,6 +1172,29 @@ pub fn clean_rust_syntax(input: &str) -> String {
     s = s.replace(" ,", ",");
     s = s.replace(" ;", ";");
     s = s.replace(" :", ":");
+    s = s.replace(",;", ";");
+    s = s.replace(", ;", ";");
+    s = s.replace(",<", ", <");
+    s = s.replace(",'", ", '");
+
+    let mut comma_spaced = String::with_capacity(s.len() + 10);
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        comma_spaced.push(chars[i]);
+        if chars[i] == ','
+            && i + 1 < chars.len()
+            && chars[i + 1] != ' '
+            && chars[i + 1] != '\n'
+            && chars[i + 1] != ';'
+            && chars[i + 1] != ')'
+            && chars[i + 1] != '>'
+        {
+            comma_spaced.push(' ');
+        }
+        i += 1;
+    }
+    s = comma_spaced;
 
     // 7. Compact reference to identifiers or types (e.g. `& StreamConfig` -> `&StreamConfig`)
     let mut cleaned = String::with_capacity(s.len());

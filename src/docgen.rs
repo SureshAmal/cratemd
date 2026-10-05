@@ -230,13 +230,20 @@ impl DocGenerator {
         if !sym.trait_impls.is_empty() {
             let _ = writeln!(out, "**Implements:** `{}`", sym.trait_impls.join("`, `"));
         }
+        if let Some(ref feat) = sym.feature {
+            let _ = writeln!(out, "**Required Feature:** `{}`", feat);
+        }
         let _ = writeln!(out);
 
         let clean_sig = clean_rust_syntax(&sym.signature);
         let _ = writeln!(out, "```rust");
         if let Some(ref detail) = sym.detail {
-            let clean_detail = clean_rust_syntax(detail);
-            let _ = writeln!(out, "{} {}", clean_sig.trim_end_matches(';'), clean_detail);
+            if detail.starts_with("Re-export of") {
+                let _ = writeln!(out, "// {}\n{}", detail, clean_sig);
+            } else {
+                let clean_detail = clean_rust_syntax(detail);
+                let _ = writeln!(out, "{} {}", clean_sig.trim_end_matches(';'), clean_detail);
+            }
         } else {
             let _ = writeln!(out, "{}", clean_sig);
         }

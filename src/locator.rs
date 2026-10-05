@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-use crate::model::CrateInfo;
+use crate::model::{CrateInfo, FeatureDef};
 
 pub struct CrateLocator;
 
@@ -333,9 +333,26 @@ fn parse_cargo_manifest(root_dir: &Path, manifest_path: &Path) -> Result<CrateIn
 
     // Features
     let mut features = Vec::new();
+    let mut feature_defs = Vec::new();
     if let Some(feats) = toml_val.get("features").and_then(|f| f.as_table()) {
-        for key in feats.keys() {
+        let default_list: Vec<String> = feats
+            .get("default")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+
+        for (key, val) in feats {
             features.push(key.clone());
+            let sub_features: Vec<String> = val
+                .as_array()
+                .map(|arr| arr.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let is_default = key == "default" || default_list.contains(key);
+            feature_defs.push(FeatureDef {
+                name: key.clone(),
+                is_default,
+                sub_features,
+            });
         }
     }
 
@@ -350,6 +367,7 @@ fn parse_cargo_manifest(root_dir: &Path, manifest_path: &Path) -> Result<CrateIn
         bin_paths,
         dependencies,
         features,
+        feature_defs,
     })
 }
 

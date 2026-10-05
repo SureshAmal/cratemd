@@ -1,15 +1,24 @@
+#![deny(dead_code)]
+
 mod analyzer;
+mod audit_cmd;
 mod cache;
 mod cli;
 mod cross_search;
 mod ctags_gen;
 mod deps_cmd;
 mod docgen;
+mod features_cmd;
+mod file_cmd;
+mod impls_cmd;
 mod locator;
+mod mcp;
 mod model;
+mod refs_cmd;
 mod search;
 mod tokens;
 mod treesitter_gen;
+mod warm_cmd;
 mod workspace;
 
 use std::fs;
@@ -18,20 +27,27 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 
 use analyzer::{clean_rust_syntax, CrateAnalyzer};
+use audit_cmd::DependencyAuditor;
 use cache::CacheManager;
 use cli::{
-    CheatArgs, Cli, Commands, CtagsArgs, DepsCliArgs, DocArgs, ExamplesArgs,
-    FindCliArgs, ListArgs, LocateArgs, OutlineArgs, SearchArgs, TokensCliArgs,
-    TreesitterArgs, ViewArgs, WorkspaceCliArgs,
+    AuditArgs, CheatArgs, Cli, Commands, CtagsArgs, DepsCliArgs, DocArgs, ExamplesArgs,
+    FeaturesArgs, FileArgs, FindCliArgs, ImplsArgs, ListArgs, LocateArgs, McpArgs, OutlineArgs,
+    RefsArgs, SearchArgs, TokensCliArgs, TreesitterArgs, ViewArgs, WarmArgs, WorkspaceCliArgs,
 };
 use cross_search::{CrossSearcher, FindArgs};
 use ctags_gen::CtagsGenerator;
 use deps_cmd::DepsInspector;
 use docgen::DocGenerator;
+use features_cmd::FeaturesInspector;
+use file_cmd::FileAnalyzer;
+use impls_cmd::ImplsQuery;
 use locator::CrateLocator;
+use mcp::McpServer;
 use model::CrateIndex;
+use refs_cmd::WorkspaceRefsFinder;
 use search::{CrateSearcher, SearchQuery};
 use treesitter_gen::TreeSitterGen;
+use warm_cmd::CacheWarmer;
 use workspace::WorkspaceInfo;
 
 fn main() {
@@ -84,8 +100,21 @@ fn run() -> Result<()> {
         Some(Commands::Treesitter(args)) => handle_treesitter(args, &cli),
         Some(Commands::Locate(args)) => handle_locate(args, &cli),
         Some(Commands::List(args)) => handle_list(args, &cli),
+        Some(Commands::Features(args)) => handle_features(args, &cli, refresh, no_cache),
+        Some(Commands::Impls(args)) => handle_impls(args, &cli, refresh, no_cache),
+        Some(Commands::Refs(args)) => handle_refs(args, &cli),
+        Some(Commands::Audit(args)) => handle_audit(args, &cli),
+        Some(Commands::Warm(args)) => handle_warm(args, &cli, refresh),
+        Some(Commands::File(args)) => handle_file(args, &cli),
+        Some(Commands::Mcp(args)) => handle_mcp(args),
         None => {
             if let Some(crate_name) = cli.crate_name.clone() {
+                // If target is a single .rs file, analyze that file
+                let file_path = Path::new(&crate_name);
+                if (file_path.is_file() && file_path.extension().map_or(false, |e| e == "rs")) || crate_name.ends_with(".rs") {
+                    return handle_file(FileArgs { path: file_path.to_path_buf() }, &cli);
+                }
+
                 // If the target is a workspace root, show workspace blueprint
                 let target_path = Path::new(&crate_name);
                 if target_path.exists() {
@@ -238,9 +267,10 @@ fn handle_search(args: SearchArgs, cli: &Cli, refresh: bool, no_cache: bool) -> 
         let sym = &hit.symbol;
         let kind_badge = format!("[{}]", sym.kind.as_str());
         let vis_str = if sym.visibility.is_public() { "" } else { " (internal)" };
+        let feat_badge = sym.feature.as_deref().map(|f| format!(" [feature: {}]", f)).unwrap_or_default();
         let clean_sig = clean_rust_syntax(&sym.signature);
 
-        let _ = writeln!(out, "{}. {} `{}`{} ({}:{})", i + 1, kind_badge, sym.id, vis_str, sym.file_path, sym.line_start);
+        let _ = writeln!(out, "{}. {} `{}`{}{} ({}:{})", i + 1, kind_badge, sym.id, feat_badge, vis_str, sym.file_path, sym.line_start);
         let _ = writeln!(out, "   {}", clean_sig);
 
         if !sym.trait_impls.is_empty() {
@@ -481,9 +511,10 @@ fn handle_find(args: FindCliArgs, cli: &Cli, refresh: bool, no_cache: bool) -> R
         };
         let kind_badge = format!("[{}]", sym.kind.as_str());
         let vis_str = if sym.visibility.is_public() { "" } else { " (internal)" };
+        let feat_badge = sym.feature.as_deref().map(|f| format!(" [feature: {}]", f)).unwrap_or_default();
         let clean_sig = clean_rust_syntax(&sym.signature);
 
-        let _ = writeln!(out, "{}. {} {} `{}`{} ({}:{})", i + 1, badge, kind_badge, sym.id, vis_str, sym.file_path, sym.line_start);
+        let _ = writeln!(out, "{}. {} {} `{}`{}{} ({}:{})", i + 1, badge, kind_badge, sym.id, feat_badge, vis_str, sym.file_path, sym.line_start);
         let _ = writeln!(out, "   {}", clean_sig);
 
         if !sym.trait_impls.is_empty() {
@@ -645,4 +676,71 @@ fn handle_tokens(args: TokensCliArgs, cli: &Cli, refresh: bool, no_cache: bool) 
 
     bail!("No crate or workspace found in current directory. Usage: cratemd tokens [crate-name-or-path]");
 }
+
+fn handle_features(args: FeaturesArgs, cli: &Cli, refresh: bool, no_cache: bool) -> Result<()> {
+    let index = load_and_index(&args.crate_name, refresh, no_cache)?;
+    let report = FeaturesInspector::inspect(&index, args.feature.as_deref());
+    if cli.json {
+        print_output(serde_json::to_string_pretty(&report)?, cli);
+    } else {
+        print_output(report.render_ascii(), cli);
+    }
+    Ok(())
+}
+
+fn handle_impls(args: ImplsArgs, cli: &Cli, refresh: bool, no_cache: bool) -> Result<()> {
+    let index = load_and_index(&args.crate_name, refresh, no_cache)?;
+    let report = ImplsQuery::query(&index, args.query.as_deref());
+    if cli.json {
+        print_output(serde_json::to_string_pretty(&report)?, cli);
+    } else {
+        print_output(report.render_ascii(), cli);
+    }
+    Ok(())
+}
+
+fn handle_refs(args: RefsArgs, cli: &Cli) -> Result<()> {
+    let report = WorkspaceRefsFinder::find(&args.symbol, args.path.as_deref(), args.limit)?;
+    if cli.json {
+        print_output(serde_json::to_string_pretty(&report)?, cli);
+    } else {
+        print_output(report.render_ascii(), cli);
+    }
+    Ok(())
+}
+
+fn handle_audit(args: AuditArgs, cli: &Cli) -> Result<()> {
+    let report = DependencyAuditor::audit(args.target.as_deref())?;
+    if cli.json {
+        print_output(serde_json::to_string_pretty(&report)?, cli);
+    } else {
+        print_output(report.render_ascii(), cli);
+    }
+    Ok(())
+}
+
+fn handle_warm(args: WarmArgs, cli: &Cli, refresh: bool) -> Result<()> {
+    let report = CacheWarmer::warm(args.target.as_deref(), args.all, refresh)?;
+    if cli.json {
+        print_output(serde_json::to_string_pretty(&report)?, cli);
+    } else {
+        print_output(report.render_ascii(), cli);
+    }
+    Ok(())
+}
+
+fn handle_file(args: FileArgs, cli: &Cli) -> Result<()> {
+    let report = FileAnalyzer::analyze(&args.path)?;
+    if cli.json {
+        print_output(serde_json::to_string_pretty(&report)?, cli);
+    } else {
+        print_output(report.render_ascii(), cli);
+    }
+    Ok(())
+}
+
+fn handle_mcp(_args: McpArgs) -> Result<()> {
+    McpServer::run()
+}
+
 
