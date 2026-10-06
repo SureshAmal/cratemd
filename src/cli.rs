@@ -374,7 +374,7 @@ pub enum CliSymbolKind {
 }
 
 impl CliSymbolKind {
-    pub fn to_model_kind(&self) -> crate::model::SymbolKind {
+    pub fn to_model_kind(self) -> crate::model::SymbolKind {
         match self {
             CliSymbolKind::Fn => crate::model::SymbolKind::Function,
             CliSymbolKind::Struct => crate::model::SymbolKind::Struct,

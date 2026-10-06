@@ -60,7 +60,7 @@ fn format_tag(sym: &Symbol) -> String {
 
     if !sym.signature.is_empty() {
         // Escape tabs or newlines in signature
-        let clean_sig = sym.signature.replace('\t', " ").replace('\n', " ");
+        let clean_sig = sym.signature.replace(['\t', '\n'], " ");
         fields.push(format!("signature:{}", clean_sig));
     }
 

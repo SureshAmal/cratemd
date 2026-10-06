@@ -70,7 +70,7 @@ impl WorkspaceRefsFinder {
         for (crate_name, dir) in search_dirs {
             for entry in WalkDir::new(&dir).into_iter().filter_map(Result::ok) {
                 let path = entry.path();
-                if path.is_file() && path.extension().map_or(false, |ext| ext == "rs") {
+                if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
                     // Skip target/ directory
                     if path.components().any(|c| c.as_os_str() == "target") {
                         continue;

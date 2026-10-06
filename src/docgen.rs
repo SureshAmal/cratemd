@@ -282,8 +282,8 @@ impl DocGenerator {
             }
         }
 
-        if include_body {
-            if let Some(root) = crate_root {
+        if include_body
+            && let Some(root) = crate_root {
                 let candidate = root.join(&sym.file_path);
                 let target_path = if candidate.exists() {
                     candidate
@@ -300,7 +300,6 @@ impl DocGenerator {
                     }
                 }
             }
-        }
 
         out
     }

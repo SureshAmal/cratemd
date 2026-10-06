@@ -34,24 +34,27 @@ impl WorkspaceInfo {
             dir.to_path_buf()
         };
 
+        let mut package_root = None;
+
         loop {
             let manifest = curr.join("Cargo.toml");
-            if manifest.exists() {
-                if let Ok(content) = std::fs::read_to_string(&manifest) {
-                    if let Ok(val) = toml::from_str::<toml::Value>(&content) {
-                        if val.get("workspace").is_some() {
-                            return Some(curr);
-                        }
+            if manifest.exists()
+                && let Ok(content) = std::fs::read_to_string(&manifest)
+                && let Ok(val) = toml::from_str::<toml::Value>(&content) {
+                    if val.get("workspace").is_some() {
+                        return Some(curr);
+                    }
+                    if package_root.is_none() && val.get("package").is_some() {
+                        package_root = Some(curr.clone());
                     }
                 }
-            }
 
             if !curr.pop() {
                 break;
             }
         }
 
-        None
+        package_root
     }
 
     /// Loads workspace information from the workspace root directory.
@@ -65,15 +68,14 @@ impl WorkspaceInfo {
 
         let mut member_patterns = Vec::new();
 
-        if let Some(ws) = toml_val.get("workspace").and_then(|w| w.as_table()) {
-            if let Some(members) = ws.get("members").and_then(|m| m.as_array()) {
+        if let Some(ws) = toml_val.get("workspace").and_then(|w| w.as_table())
+            && let Some(members) = ws.get("members").and_then(|m| m.as_array()) {
                 for m in members {
                     if let Some(s) = m.as_str() {
                         member_patterns.push(s.to_string());
                     }
                 }
             }
-        }
 
         // If package exists in root Cargo.toml, the root itself is also a crate
         let has_root_package = toml_val.get("package").is_some();
@@ -95,11 +97,10 @@ impl WorkspaceInfo {
         let mut raw_members = Vec::new();
         for dir in &member_dirs {
             let m_path = dir.join("Cargo.toml");
-            if m_path.exists() {
-                if let Ok(info) = CrateLocator::locate(&dir.to_string_lossy()) {
+            if m_path.exists()
+                && let Ok(info) = CrateLocator::locate(&dir.to_string_lossy()) {
                     raw_members.push((dir.clone(), m_path, info));
                 }
-            }
         }
 
         let all_member_names: HashSet<String> = raw_members.iter().map(|(_, _, info)| info.name.clone()).collect();
@@ -161,13 +162,16 @@ impl WorkspaceInfo {
         use std::fmt::Write;
         let mut out = String::new();
 
-        let _ = writeln!(out, "# Workspace Architecture: `{}`\n", self.root_dir.display());
+        let is_single = self.members.len() == 1 && self.members[0].rel_path == ".";
+        let title = if is_single { "Project Architecture" } else { "Workspace Architecture" };
+
+        let _ = writeln!(out, "# {}: `{}`\n", title, self.root_dir.display());
         let _ = writeln!(out, "**Member Crates:** {} | **Cargo.lock:** {}\n",
             self.members.len(),
             if self.lockfile_present { "Present" } else { "Not found" }
         );
 
-        let _ = writeln!(out, "## Member Crates Overview\n");
+        let _ = writeln!(out, "## {}\n", if is_single { "Crate Overview" } else { "Member Crates Overview" });
 
         for m in &self.members {
             let _ = writeln!(out, "### `{}` (v{})", m.name, m.version);
@@ -218,8 +222,8 @@ fn expand_member_pattern(root: &Path, pattern: &str, out: &mut Vec<PathBuf>) {
 
     if let Some(prefix) = pattern.strip_suffix("/*") {
         let parent = root.join(prefix);
-        if parent.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(parent) {
+        if parent.is_dir()
+            && let Ok(entries) = std::fs::read_dir(parent) {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_dir() && path.join("Cargo.toml").exists() {
@@ -227,7 +231,6 @@ fn expand_member_pattern(root: &Path, pattern: &str, out: &mut Vec<PathBuf>) {
                     }
                 }
             }
-        }
     } else {
         let path = root.join(pattern);
         if path.is_dir() && path.join("Cargo.toml").exists() {
@@ -273,6 +276,13 @@ mod tests {
     fn test_find_root_non_workspace() {
         let root = WorkspaceInfo::find_root(Path::new("/tmp"));
         assert!(root.is_none());
+    }
+
+    #[test]
+    fn test_find_root_single_crate() {
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let root = WorkspaceInfo::find_root(manifest_dir);
+        assert_eq!(root, Some(manifest_dir.to_path_buf()));
     }
 
     #[test]

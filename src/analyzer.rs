@@ -63,7 +63,7 @@ impl CrateAnalyzer {
         if src_dir.exists() {
             for entry in WalkDir::new(&src_dir).into_iter().filter_map(Result::ok) {
                 let path = entry.path();
-                if path.is_file() && path.extension().map_or(false, |ext| ext == "rs") {
+                if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
                     let canon = canonicalize_or_self(path);
                     if !visited_files.contains(&canon) {
                         visited_files.insert(canon);
@@ -269,6 +269,7 @@ impl CrateAnalyzer {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn parse_inline_module(
         &self,
         name: &str,
@@ -894,11 +895,10 @@ fn attach_impl_data(all_symbols: &mut [Symbol]) {
             if let Some(ref p) = s.parent {
                 methods_by_parent.entry(p.clone()).or_default().push(s.clone());
             }
-        } else if s.kind == SymbolKind::Impl {
-            if let (Some(p), Some(t)) = (&s.parent, &s.detail) {
+        } else if s.kind == SymbolKind::Impl
+            && let (Some(p), Some(t)) = (&s.parent, &s.detail) {
                 traits_by_parent.entry(p.clone()).or_default().push(t.clone());
             }
-        }
     }
 
     for s in all_symbols.iter_mut() {
@@ -986,7 +986,7 @@ fn load_standalone_examples(root_dir: &Path) -> Vec<CodeExample> {
         let mut paths: Vec<_> = entries.flatten().map(|e| e.path()).collect();
         paths.sort();
         for path in paths {
-            if path.extension().map_or(false, |ext| ext == "rs") {
+            if path.extension().is_some_and(|ext| ext == "rs") {
                 let file_name = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
                 if let Ok(content) = std::fs::read_to_string(&path) {
                     result.push(CodeExample {
@@ -1032,16 +1032,14 @@ fn vis_prefix(vis: Visibility) -> &'static str {
 pub(crate) fn extract_docs(attrs: &[Attribute]) -> String {
     let mut lines = Vec::new();
     for attr in attrs {
-        if attr.path().is_ident("doc") {
-            if let Meta::NameValue(nv) = &attr.meta {
-                if let Expr::Lit(ExprLit {
+        if attr.path().is_ident("doc")
+            && let Meta::NameValue(nv) = &attr.meta
+                && let Expr::Lit(ExprLit {
                     lit: Lit::Str(s), ..
                 }) = &nv.value
                 {
                     lines.push(s.value());
                 }
-            }
-        }
     }
     clean_doc_lines(&lines)
 }
@@ -1066,11 +1064,9 @@ fn extract_cfg_feature(attrs: &[Attribute]) -> Option<String> {
                 }
             } else if let Some(start) = tokens.find("feature =") {
                 let rest = &tokens[start + 9..].trim_start();
-                if rest.starts_with('"') {
-                    let rest = &rest[1..];
-                    if let Some(end) = rest.find('"') {
-                        return Some(rest[..end].to_string());
-                    }
+                if let Some(rest) = rest.strip_prefix('"')
+                    && let Some(end) = rest.find('"') {
+                    return Some(rest[..end].to_string());
                 }
             }
         }
@@ -1095,10 +1091,7 @@ pub(crate) fn format_signature(sig: &Signature) -> String {
     if sig.asyncness.is_some() {
         parts.push("async");
     }
-    match &sig.safety {
-        syn::Safety::Unsafe(_) => parts.push("unsafe"),
-        _ => {}
-    }
+    if let syn::Safety::Unsafe(_) = &sig.safety { parts.push("unsafe") }
     parts.push("fn");
 
     let name = sig.ident.to_string();
@@ -1158,14 +1151,14 @@ pub fn clean_rust_syntax(input: &str) -> String {
 
     // 4. Slices and arrays
     s = s.replace("& [", "&[");
-    s = s.replace("&mut [", "&mut [");
+    s = s.replace("& mut [", "&mut [");
     s = s.replace("[ ", "[");
     s = s.replace(" ]", "]");
 
     // 5. Parentheses and argument lists
     s = s.replace("( ", "(");
     s = s.replace(" )", ")");
-    s = s.replace("()", "()");
+    s = s.replace("( )", "()");
     s = s.replace(" ()", "()");
 
     // 6. Commas, colons, and semicolons

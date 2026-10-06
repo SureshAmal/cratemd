@@ -38,8 +38,8 @@ impl ImplsQuery {
 
             // 1. Check if target is a struct/enum/type (finding traits it implements)
             for sym in &index.symbols {
-                if sym.kind == SymbolKind::Struct || sym.kind == SymbolKind::Enum {
-                    if sym.name.eq_ignore_ascii_case(target) || sym.id.ends_with(&format!("::{}", target)) {
+                if (sym.kind == SymbolKind::Struct || sym.kind == SymbolKind::Enum)
+                    && (sym.name.eq_ignore_ascii_case(target) || sym.id.ends_with(&format!("::{}", target))) {
                         // Derived traits
                         for derived in &sym.trait_impls {
                             matches.push(TraitImplMatch {
@@ -51,15 +51,14 @@ impl ImplsQuery {
                             });
                         }
                     }
-                }
             }
 
             // Explicit impls where parent == target
             for sym in &index.symbols {
                 if sym.kind == SymbolKind::Impl {
-                    let parent_match = sym.parent.as_ref().map_or(false, |p| p.eq_ignore_ascii_case(target));
-                    if parent_match {
-                        if let Some(ref t_name) = sym.detail {
+                    let parent_match = sym.parent.as_ref().is_some_and(|p| p.eq_ignore_ascii_case(target));
+                    if parent_match
+                        && let Some(ref t_name) = sym.detail {
                             matches.push(TraitImplMatch {
                                 target_type: sym.parent.clone().unwrap_or_default(),
                                 trait_name: t_name.clone(),
@@ -68,14 +67,13 @@ impl ImplsQuery {
                                 is_derived: false,
                             });
                         }
-                    }
                 }
             }
 
             // 2. Also check if target is a trait (finding types that implement it)
             for sym in &index.symbols {
                 if sym.kind == SymbolKind::Impl {
-                    let trait_match = sym.detail.as_ref().map_or(false, |t| {
+                    let trait_match = sym.detail.as_ref().is_some_and(|t| {
                         t.eq_ignore_ascii_case(target) || t.to_lowercase().contains(&target_lower)
                     });
                     if trait_match {
@@ -96,8 +94,8 @@ impl ImplsQuery {
         } else {
             // No query: collect all explicit trait implementations in the crate
             for sym in &index.symbols {
-                if sym.kind == SymbolKind::Impl {
-                    if let Some(ref t_name) = sym.detail {
+                if sym.kind == SymbolKind::Impl
+                    && let Some(ref t_name) = sym.detail {
                         matches.push(TraitImplMatch {
                             target_type: sym.parent.clone().unwrap_or_else(|| "Unknown".to_string()),
                             trait_name: t_name.clone(),
@@ -106,7 +104,6 @@ impl ImplsQuery {
                             is_derived: false,
                         });
                     }
-                }
             }
         }
 

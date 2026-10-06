@@ -82,9 +82,7 @@ fn handle_rpc_message(msg: &Value) -> Option<Value> {
     let id = msg.get("id").cloned();
 
     // Notifications (no id)
-    if id.is_none() {
-        return None;
-    }
+    id.as_ref()?;
     let id_val = id.unwrap();
 
     match method {
@@ -442,6 +440,33 @@ fn get_tool_definitions() -> Vec<Value> {
                 "required": ["crate_name"]
             }
         }),
+        json!({
+            "name": "cratemd_list",
+            "description": "List all Rust crates cached locally in the Cargo registry with versions and paths",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "type": "string",
+                        "description": "Optional name filter for listing cached crates"
+                    }
+                }
+            }
+        }),
+        json!({
+            "name": "cratemd_locate",
+            "description": "Locate a crate on the local system and inspect its root directory, manifest path, and metadata",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Crate name or spec (e.g. 'tokio', 'serde@1.0.229', or path)"
+                    }
+                },
+                "required": ["crate_name"]
+            }
+        }),
     ]
 }
 
@@ -707,11 +732,10 @@ fn execute_tool(name: &str, args: &Value) -> (String, bool) {
                 }
             } else {
                 let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-                if let Some(ws_root) = WorkspaceInfo::find_root(&cwd) {
-                    if let Ok(ws) = WorkspaceInfo::load(&ws_root) {
+                if let Some(ws_root) = WorkspaceInfo::find_root(&cwd)
+                    && let Ok(ws) = WorkspaceInfo::load(&ws_root) {
                         return (tokens::render_workspace_context_impact(&ws), false);
                     }
-                }
                 match load_index(".") {
                     Ok(index) => (tokens::render_crate_context_impact(&index), false),
                     Err(err) => (format!("Error analyzing tokens: {:#}", err), true),
@@ -748,6 +772,54 @@ fn execute_tool(name: &str, args: &Value) -> (String, bool) {
                     (examples, false)
                 }
                 Err(err) => (format!("Error loading crate '{}': {:#}", crate_name, err), true),
+            }
+        }
+
+        "cratemd_list" => {
+            let filter = args.get("filter").and_then(|f| f.as_str());
+            match CrateLocator::list_cached(filter) {
+                Ok(crates) => {
+                    if crates.is_empty() {
+                        ("No locally cached crates found.".to_string(), false)
+                    } else {
+                        use std::fmt::Write;
+                        let mut out = format!("# Locally Cached Crates ({} found)\n\n| Crate | Version | Path |\n|---|---|---|\n", crates.len());
+                        for (name, ver, path) in crates {
+                            let _ = writeln!(out, "| `{}` | `{}` | `{}` |", name, ver, path.display());
+                        }
+                        (out, false)
+                    }
+                }
+                Err(err) => (format!("Error listing cached crates: {:#}", err), true),
+            }
+        }
+
+        "cratemd_locate" => {
+            let crate_name = match args.get("crate_name").and_then(|c| c.as_str()) {
+                Some(c) => c,
+                None => return ("Missing 'crate_name' argument".to_string(), true),
+            };
+            match CrateLocator::locate(crate_name) {
+                Ok(info) => {
+                    use std::fmt::Write;
+                    let mut out = format!("# Crate Location: `{}` v{}\n\n", info.name, info.version);
+                    let _ = writeln!(out, "- **Root Directory:** `{}`", info.root_dir.display());
+                    let _ = writeln!(out, "- **Manifest Path:** `{}`", info.manifest_path.display());
+                    let _ = writeln!(out, "- **Edition:** {}", info.edition);
+                    if let Some(ref desc) = info.description {
+                        let _ = writeln!(out, "- **Description:** {}", desc);
+                    }
+                    if let Some(ref lib) = info.lib_path {
+                        let _ = writeln!(out, "- **Library Entry:** `{}`", lib.display());
+                    }
+                    if !info.bin_paths.is_empty() {
+                        let bins: Vec<String> = info.bin_paths.iter().map(|p| format!("`{}`", p.display())).collect();
+                        let _ = writeln!(out, "- **Binary Entries:** {}", bins.join(", "));
+                    }
+                    let _ = writeln!(out, "- **Dependencies ({}):** `{}`", info.dependencies.len(), info.dependencies.join("`, `"));
+                    (out, false)
+                }
+                Err(err) => (format!("Error locating crate '{}': {:#}", crate_name, err), true),
             }
         }
 

@@ -57,11 +57,10 @@ impl CrossSearcher {
                 // Add workspace members
                 if !args.deps_only {
                     for m in &ws.members {
-                        if let Some(ref filter_crate) = args.specific_crate {
-                            if &m.name != filter_crate {
+                        if let Some(ref filter_crate) = args.specific_crate
+                            && &m.name != filter_crate {
                                 continue;
                             }
-                        }
                         target_crates.push((m.name.clone(), m.abs_path.clone(), true));
                     }
                 }
@@ -72,11 +71,10 @@ impl CrossSearcher {
                     for m in &ws.members {
                         for dep_name in &m.external_deps {
                             if seen_deps.insert(dep_name.clone()) {
-                                if let Some(ref filter_crate) = args.specific_crate {
-                                    if dep_name != filter_crate {
+                                if let Some(ref filter_crate) = args.specific_crate
+                                    && dep_name != filter_crate {
                                         continue;
                                     }
-                                }
                                 let resolved_ver = lockfile_map.get(dep_name).cloned();
                                 dep_specs.push((dep_name.clone(), resolved_ver));
                             }
@@ -100,11 +98,10 @@ impl CrossSearcher {
                 if !args.workspace_only {
                     let lock_map = parse_lockfile(&info.root_dir.join("Cargo.lock"));
                     for dep in &info.dependencies {
-                        if let Some(ref filter_crate) = args.specific_crate {
-                            if dep != filter_crate {
+                        if let Some(ref filter_crate) = args.specific_crate
+                            && dep != filter_crate {
                                 continue;
                             }
-                        }
                         let resolved_ver = lock_map.get(dep).cloned();
                         dep_specs.push((dep.clone(), resolved_ver));
                     }

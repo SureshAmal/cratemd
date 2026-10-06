@@ -57,11 +57,10 @@ fn main() {
     }
 
     if let Err(err) = run() {
-        if let Some(io_err) = err.downcast_ref::<std::io::Error>() {
-            if io_err.kind() == std::io::ErrorKind::BrokenPipe {
+        if let Some(io_err) = err.downcast_ref::<std::io::Error>()
+            && io_err.kind() == std::io::ErrorKind::BrokenPipe {
                 return;
             }
-        }
         eprintln!("cratemd: {:#}", err);
         std::process::exit(1);
     }
@@ -111,21 +110,18 @@ fn run() -> Result<()> {
             if let Some(crate_name) = cli.crate_name.clone() {
                 // If target is a single .rs file, analyze that file
                 let file_path = Path::new(&crate_name);
-                if (file_path.is_file() && file_path.extension().map_or(false, |e| e == "rs")) || crate_name.ends_with(".rs") {
+                if (file_path.is_file() && file_path.extension().is_some_and(|e| e == "rs")) || crate_name.ends_with(".rs") {
                     return handle_file(FileArgs { path: file_path.to_path_buf(), symbol: None, body: false }, &cli);
                 }
 
                 // If the target is a workspace root, show workspace blueprint
                 let target_path = Path::new(&crate_name);
-                if target_path.exists() {
-                    if let Some(ws_root) = WorkspaceInfo::find_root(target_path) {
-                        if let Ok(ws) = WorkspaceInfo::load(&ws_root) {
-                            if ws.members.len() > 1 {
+                if target_path.exists()
+                    && let Some(ws_root) = WorkspaceInfo::find_root(target_path)
+                        && let Ok(ws) = WorkspaceInfo::load(&ws_root)
+                            && ws.members.len() > 1 {
                                 return handle_workspace(WorkspaceCliArgs { path: Some(ws_root) }, &cli);
                             }
-                        }
-                    }
-                }
 
                 // Default action when just crate name is provided: generate LLM doc
                 handle_doc(
@@ -565,7 +561,7 @@ fn handle_workspace(args: WorkspaceCliArgs, cli: &Cli) -> Result<()> {
     };
 
     let ws_root = WorkspaceInfo::find_root(&abs_path)
-        .context("Could not find Cargo workspace root (no [workspace] table found in Cargo.toml hierarchy)")?;
+        .context("Could not find Cargo workspace or project root (no Cargo.toml found in directory hierarchy)")?;
 
     let ws = WorkspaceInfo::load(&ws_root)?;
 
@@ -585,10 +581,10 @@ fn handle_tokens(args: TokensCliArgs, cli: &Cli, refresh: bool, no_cache: bool) 
     // 1. If target is explicitly provided
     if let Some(t) = target {
         let p = Path::new(t);
-        if p.exists() && p.is_dir() {
-            if let Some(ws_root) = WorkspaceInfo::find_root(p) {
-                if let Ok(ws) = WorkspaceInfo::load(&ws_root) {
-                    if ws.members.len() > 1 {
+        if p.exists() && p.is_dir()
+            && let Some(ws_root) = WorkspaceInfo::find_root(p)
+                && let Ok(ws) = WorkspaceInfo::load(&ws_root)
+                    && ws.members.len() > 1 {
                         if cli.json {
                             let bp = ws.render_blueprint();
                             let tokens = tokens::estimate_tokens(&bp);
@@ -604,9 +600,6 @@ fn handle_tokens(args: TokensCliArgs, cli: &Cli, refresh: bool, no_cache: bool) 
                         print_output(report, cli);
                         return Ok(());
                     }
-                }
-            }
-        }
 
         // Try indexing as crate
         let index = load_and_index(t, refresh, no_cache)?;
@@ -641,8 +634,8 @@ fn handle_tokens(args: TokensCliArgs, cli: &Cli, refresh: bool, no_cache: bool) 
 
     // 2. Target is None -> check current directory
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    if let Some(ws_root) = WorkspaceInfo::find_root(&cwd) {
-        if let Ok(ws) = WorkspaceInfo::load(&ws_root) {
+    if let Some(ws_root) = WorkspaceInfo::find_root(&cwd)
+        && let Ok(ws) = WorkspaceInfo::load(&ws_root) {
             if ws.members.len() > 1 {
                 if cli.json {
                     let bp = ws.render_blueprint();
@@ -665,7 +658,6 @@ fn handle_tokens(args: TokensCliArgs, cli: &Cli, refresh: bool, no_cache: bool) 
                 return Ok(());
             }
         }
-    }
 
     if cwd.join("Cargo.toml").exists() {
         let index = load_and_index(".", refresh, no_cache)?;
@@ -742,7 +734,7 @@ fn handle_file(args: FileArgs, cli: &Cli) -> Result<()> {
             print_output(serde_json::to_string_pretty(&report)?, cli);
         }
     } else if let Some(ref sym) = args.symbol {
-        print_output(report.render_symbol(sym, args.body || true), cli);
+        print_output(report.render_symbol(sym, args.body), cli);
     } else {
         print_output(report.render_ascii(), cli);
     }

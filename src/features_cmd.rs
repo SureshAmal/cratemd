@@ -60,11 +60,10 @@ impl FeaturesInspector {
         let mut feature_symbols = Vec::new();
         if let Some(target_f) = feature_filter {
             for sym in &index.symbols {
-                if let Some(ref sym_f) = sym.feature {
-                    if sym_f == target_f {
+                if let Some(ref sym_f) = sym.feature
+                    && sym_f == target_f {
                         feature_symbols.push(format!("[{}] {}", sym.kind.as_str(), sym.id));
                     }
-                }
             }
         }
 

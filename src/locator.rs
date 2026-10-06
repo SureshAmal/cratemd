@@ -20,7 +20,7 @@ impl CrateLocator {
         // 1. If it's a direct path on disk
         let direct_path = PathBuf::from(&name);
         if direct_path.exists() {
-            let manifest = if direct_path.is_file() && direct_path.file_name().map_or(false, |f| f == "Cargo.toml") {
+            let manifest = if direct_path.is_file() && direct_path.file_name().is_some_and(|f| f == "Cargo.toml") {
                 direct_path.clone()
             } else {
                 direct_path.join("Cargo.toml")
@@ -40,19 +40,17 @@ impl CrateLocator {
         // 3. Search ~/.cargo/registry/src/
         if let Some(home) = home_dir() {
             let registry_src = home.join(".cargo/registry/src");
-            if registry_src.exists() {
-                if let Some(info) = search_registry_dirs(&registry_src, &name, req_version.as_deref())? {
+            if registry_src.exists()
+                && let Some(info) = search_registry_dirs(&registry_src, &name, req_version.as_deref())? {
                     return Ok(info);
                 }
-            }
 
             // 4. Search ~/.cargo/git/checkouts/
             let git_checkouts = home.join(".cargo/git/checkouts");
-            if git_checkouts.exists() {
-                if let Some(info) = search_git_checkouts(&git_checkouts, &name)? {
+            if git_checkouts.exists()
+                && let Some(info) = search_git_checkouts(&git_checkouts, &name)? {
                     return Ok(info);
                 }
-            }
         }
 
         bail!(
@@ -83,11 +81,10 @@ impl CrateLocator {
                     if path.is_dir() {
                         let dir_name = crate_dir.file_name().to_string_lossy().to_string();
                         if let Some((crate_name, version)) = split_crate_version(&dir_name) {
-                            if let Some(f) = filter {
-                                if !crate_name.contains(f) {
+                            if let Some(f) = filter
+                                && !crate_name.contains(f) {
                                     continue;
                                 }
-                            }
                             results.push((crate_name, version, path));
                         }
                     }
@@ -121,7 +118,7 @@ fn split_crate_version(dir_name: &str) -> Option<(String, String)> {
     for (i, c) in dir_name.char_indices() {
         if c == '-' {
             let after = &dir_name[i + 1..];
-            if after.chars().next().map_or(false, |ch| ch.is_ascii_digit()) {
+            if after.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
                 let name = &dir_name[..i];
                 if !name.contains('+') && !name.contains('.') {
                     return Some((name.to_string(), after.to_string()));
@@ -134,7 +131,7 @@ fn split_crate_version(dir_name: &str) -> Option<(String, String)> {
 
 fn compare_semver(a: &str, b: &str) -> Ordering {
     let parse_nums = |s: &str| -> Vec<u64> {
-        s.split(|c: char| c == '.' || c == '-' || c == '+')
+        s.split(['.', '-', '+'])
             .filter_map(|part| part.parse::<u64>().ok())
             .collect()
     };
@@ -165,8 +162,8 @@ fn search_registry_dirs(
             }
 
             let dir_name = crate_entry.file_name().to_string_lossy().to_string();
-            if let Some((c_name, c_ver)) = split_crate_version(&dir_name) {
-                if c_name == target_name {
+            if let Some((c_name, c_ver)) = split_crate_version(&dir_name)
+                && c_name == target_name {
                     if let Some(req_ver) = req_version {
                         if c_ver == req_ver || c_ver.starts_with(req_ver) {
                             matches.push((c_ver, path));
@@ -175,7 +172,6 @@ fn search_registry_dirs(
                         matches.push((c_ver, path));
                     }
                 }
-            }
         }
     }
 
@@ -204,11 +200,10 @@ fn search_git_checkouts(git_checkouts: &Path, target_name: &str) -> Result<Optio
         if repo_entry.file_name() == "Cargo.toml" {
             let manifest = repo_entry.path();
             let root_dir = manifest.parent().unwrap();
-            if let Ok(info) = parse_cargo_manifest(root_dir, manifest) {
-                if info.name == target_name {
+            if let Ok(info) = parse_cargo_manifest(root_dir, manifest)
+                && info.name == target_name {
                     return Ok(Some(info));
                 }
-            }
         }
     }
     Ok(None)
@@ -218,13 +213,11 @@ fn check_current_workspace(target_name: &str) -> Result<CrateInfo> {
     let cwd = std::env::current_dir()?;
     // check if current dir has Cargo.toml and matches
     let cwd_manifest = cwd.join("Cargo.toml");
-    if cwd_manifest.exists() {
-        if let Ok(info) = parse_cargo_manifest(&cwd, &cwd_manifest) {
-            if info.name == target_name {
+    if cwd_manifest.exists()
+        && let Ok(info) = parse_cargo_manifest(&cwd, &cwd_manifest)
+            && info.name == target_name {
                 return Ok(info);
             }
-        }
-    }
 
     // check subdirectories
     let sub = cwd.join(target_name).join("Cargo.toml");
@@ -294,16 +287,15 @@ fn parse_cargo_manifest(root_dir: &Path, manifest_path: &Path) -> Result<CrateIn
     }
 
     let bin_dir = root_dir.join("src/bin");
-    if bin_dir.exists() && bin_dir.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(bin_dir) {
+    if bin_dir.exists() && bin_dir.is_dir()
+        && let Ok(entries) = std::fs::read_dir(bin_dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.extension().map_or(false, |ext| ext == "rs") {
+                if p.extension().is_some_and(|ext| ext == "rs") {
                     bin_paths.push(p);
                 }
             }
         }
-    }
 
     // Dependencies (standard, build, and target-specific)
     let mut dependencies = Vec::new();

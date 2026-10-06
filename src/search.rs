@@ -36,11 +36,10 @@ impl CrateSearcher {
                 continue;
             }
 
-            if let Some(ref k) = query.kind_filter {
-                if sym.kind != *k {
+            if let Some(ref k) = query.kind_filter
+                && sym.kind != *k {
                     continue;
                 }
-            }
 
             // Apply signature filters
             if !matches_signature_filters(sym, &ret_filter, &takes_filter) {
@@ -62,11 +61,10 @@ impl CrateSearcher {
                     continue;
                 }
 
-                if let Some(ref k) = query.kind_filter {
-                    if method.kind != *k {
+                if let Some(ref k) = query.kind_filter
+                    && method.kind != *k {
                         continue;
                     }
-                }
 
                 if !matches_signature_filters(method, &ret_filter, &takes_filter) {
                     continue;
@@ -152,8 +150,8 @@ fn score_symbol(
 
     // If query text is empty but filters are active, give default score
     if q.is_empty() {
-        if query.returns_filter.is_some() || query.takes_filter.is_some() {
-            return (50, vec!["type_filter"]);
+        if query.returns_filter.is_some() || query.takes_filter.is_some() || query.kind_filter.is_some() {
+            return (50, vec!["filter"]);
         }
         return (0, matched_in);
     }

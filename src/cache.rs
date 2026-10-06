@@ -47,15 +47,12 @@ impl CacheManager {
         }
 
         // For local crates, verify cache isn't stale
-        if is_local_crate(crate_root) {
-            if let Ok(cache_meta) = cache_path.metadata() {
-                if let Ok(cache_mtime) = cache_meta.modified() {
-                    if is_source_newer(crate_root, cache_mtime) {
+        if is_local_crate(crate_root)
+            && let Ok(cache_meta) = cache_path.metadata()
+                && let Ok(cache_mtime) = cache_meta.modified()
+                    && is_source_newer(crate_root, cache_mtime) {
                         return None; // Cache is stale
                     }
-                }
-            }
-        }
 
         let file = File::open(&cache_path).ok()?;
         let reader = BufReader::new(file);
@@ -106,13 +103,11 @@ fn is_source_newer(root: &Path, cache_time: SystemTime) -> bool {
     let check_files = ["Cargo.toml", "Cargo.lock", "src/lib.rs", "src/main.rs"];
     for rel in check_files {
         let f = root.join(rel);
-        if let Ok(meta) = f.metadata() {
-            if let Ok(mtime) = meta.modified() {
-                if mtime > cache_time {
+        if let Ok(meta) = f.metadata()
+            && let Ok(mtime) = meta.modified()
+                && mtime > cache_time {
                     return true;
                 }
-            }
-        }
     }
     false
 }

@@ -291,7 +291,37 @@ Extract runnable code snippets from crate docstrings and the `examples/` directo
 
 ---
 
-### 16. Additional CLI Utilities
+### 16. List Locally Cached Crates
+Discover which crates and versions are already cached offline in Cargo's registry without internet access.
+
+- **MCP Tool**:
+  ```json
+  cratemd_list({})
+  cratemd_list({ "filter": "tokio" })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd list
+  cratemd list tokio
+  ```
+
+---
+
+### 17. Locate Crate Root and Manifest
+Locate the exact filesystem paths, manifest, library entry, and dependencies for any crate.
+
+- **MCP Tool**:
+  ```json
+  cratemd_locate({ "crate_name": "axum" })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd locate axum
+  ```
+
+---
+
+### 18. Additional CLI Utilities
 The CLI supports specialized indexing utilities:
 
 ```bash

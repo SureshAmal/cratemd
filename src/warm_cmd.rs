@@ -111,8 +111,8 @@ impl CacheWarmer {
             };
 
             // Check if already in cache and not refreshed
-            if !refresh {
-                if let Some(cached_idx) = cache.load(&info.name, &info.version, &info.root_dir) {
+            if !refresh
+                && let Some(cached_idx) = cache.load(&info.name, &info.version, &info.root_dir) {
                     items.push(WarmedCrate {
                         name: info.name,
                         version: info.version,
@@ -122,7 +122,6 @@ impl CacheWarmer {
                     });
                     continue;
                 }
-            }
 
             // Analyze and store
             match CrateAnalyzer::new(info.clone()).analyze() {
