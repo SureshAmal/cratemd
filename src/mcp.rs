@@ -219,6 +219,10 @@ fn get_tool_definitions() -> Vec<Value> {
                     "symbol": {
                         "type": "string",
                         "description": "Exact or partial symbol name (e.g. 'Router', 'AudioProcessing::process_capture_i16')"
+                    },
+                    "include_body": {
+                        "type": "boolean",
+                        "description": "If true, extracts and includes the full source code implementation block (Lstart-Lend) of the symbol or method"
                     }
                 },
                 "required": ["crate_name", "symbol"]
@@ -233,6 +237,14 @@ fn get_tool_definitions() -> Vec<Value> {
                     "path": {
                         "type": "string",
                         "description": "Relative or absolute path to the .rs file"
+                    },
+                    "symbol": {
+                        "type": "string",
+                        "description": "Optional symbol or function name to inspect specifically within this file"
+                    },
+                    "include_body": {
+                        "type": "boolean",
+                        "description": "Whether to include source code lines of the item (defaults to true when symbol is specified)"
                     }
                 },
                 "required": ["path"]
@@ -251,6 +263,30 @@ fn get_tool_definitions() -> Vec<Value> {
                     "path": {
                         "type": "string",
                         "description": "Workspace root directory (defaults to current directory)"
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Filter by symbol kind (fn, struct, enum, trait, method, type, macro, const)"
+                    },
+                    "returns": {
+                        "type": "string",
+                        "description": "Filter functions by return type (e.g. 'Result', 'Option', 'Stream')"
+                    },
+                    "takes": {
+                        "type": "string",
+                        "description": "Filter functions by parameter type (e.g. 'Context', 'Request', 'TcpStream')"
+                    },
+                    "workspace_only": {
+                        "type": "boolean",
+                        "description": "Search only within workspace member crates (exclude external dependencies)"
+                    },
+                    "deps_only": {
+                        "type": "boolean",
+                        "description": "Search only within external dependencies (exclude workspace members)"
+                    },
+                    "specific_crate": {
+                        "type": "string",
+                        "description": "Restrict search to a specific crate name"
                     },
                     "limit": {
                         "type": "integer",
@@ -370,6 +406,42 @@ fn get_tool_definitions() -> Vec<Value> {
                 }
             }
         }),
+        json!({
+            "name": "cratemd_outline",
+            "description": "Hierarchical module outline and symbol tree for a crate",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Crate name or path"
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "Maximum module depth (default 4)"
+                    }
+                },
+                "required": ["crate_name"]
+            }
+        }),
+        json!({
+            "name": "cratemd_examples",
+            "description": "Extract runnable code examples from documentation and examples/ directory for a crate",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Crate name or path"
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional keyword or title filter for examples"
+                    }
+                },
+                "required": ["crate_name"]
+            }
+        }),
     ]
 }
 
@@ -443,16 +515,24 @@ fn execute_tool(name: &str, args: &Value) -> (String, bool) {
                 Some(s) => s,
                 None => return ("Missing 'symbol' argument".to_string(), true),
             };
+            let include_body = args.get("include_body").and_then(|b| b.as_bool()).unwrap_or(false);
 
             match load_index(crate_name) {
                 Ok(index) => {
+                    let target_suffix = format!("::{}", symbol_query);
                     let sym_opt = index.symbols.iter().find(|s| s.id == symbol_query || s.name == symbol_query)
+                        .or_else(|| index.symbols.iter().find(|s| s.id.ends_with(&target_suffix)))
+                        .or_else(|| {
+                            index.symbols.iter().flat_map(|s| &s.methods).find(|m| {
+                                m.id == symbol_query || m.name == symbol_query || m.id.ends_with(&target_suffix)
+                            })
+                        })
                         .or_else(|| {
                             index.symbols.iter().find(|s| s.name.eq_ignore_ascii_case(symbol_query) || s.id.ends_with(&format!("::{}", symbol_query)))
                         });
 
                     if let Some(sym) = sym_opt {
-                        let text = DocGenerator::render_symbol_detail(sym);
+                        let text = DocGenerator::render_symbol_detail_with_source(sym, Some(&index.info.root_dir), include_body);
                         (text, false)
                     } else {
                         (format!("Symbol '{}' not found in crate '{}'.", symbol_query, crate_name), true)
@@ -467,9 +547,18 @@ fn execute_tool(name: &str, args: &Value) -> (String, bool) {
                 Some(p) => p,
                 None => return ("Missing 'path' argument".to_string(), true),
             };
+            let symbol_opt = args.get("symbol").and_then(|s| s.as_str());
+            let include_body = args.get("include_body").and_then(|b| b.as_bool()).unwrap_or(true);
+
             let p = Path::new(path_str);
             match FileAnalyzer::analyze(p) {
-                Ok(report) => (report.render_ascii(), false),
+                Ok(report) => {
+                    if let Some(sym) = symbol_opt {
+                        (report.render_symbol(sym, include_body), false)
+                    } else {
+                        (report.render_ascii(), false)
+                    }
+                }
                 Err(err) => (format!("Error analyzing file '{}': {:#}", path_str, err), true),
             }
         }
@@ -481,21 +570,40 @@ fn execute_tool(name: &str, args: &Value) -> (String, bool) {
             };
             let path_opt = args.get("path").and_then(|p| p.as_str()).map(PathBuf::from);
             let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(25) as usize;
+            let kind = args.get("kind").and_then(|k| k.as_str()).and_then(|s| match s {
+                "fn" => Some(crate::cli::CliSymbolKind::Fn),
+                "struct" => Some(crate::cli::CliSymbolKind::Struct),
+                "enum" => Some(crate::cli::CliSymbolKind::Enum),
+                "trait" => Some(crate::cli::CliSymbolKind::Trait),
+                "method" => Some(crate::cli::CliSymbolKind::Method),
+                "type" => Some(crate::cli::CliSymbolKind::Type),
+                "const" => Some(crate::cli::CliSymbolKind::Const),
+                "static" => Some(crate::cli::CliSymbolKind::Static),
+                "macro" => Some(crate::cli::CliSymbolKind::Macro),
+                "module" => Some(crate::cli::CliSymbolKind::Module),
+                "impl" => Some(crate::cli::CliSymbolKind::Impl),
+                _ => None,
+            });
+            let returns = args.get("returns").and_then(|r| r.as_str()).map(|s| s.to_string());
+            let takes = args.get("takes").and_then(|t| t.as_str()).map(|s| s.to_string());
+            let workspace_only = args.get("workspace_only").and_then(|w| w.as_bool()).unwrap_or(false);
+            let deps_only = args.get("deps_only").and_then(|d| d.as_bool()).unwrap_or(false);
+            let specific_crate = args.get("specific_crate").and_then(|c| c.as_str()).map(|s| s.to_string());
 
             let cache = CacheManager::new(true, false);
 
             let find_args = FindArgs {
                 query: query.to_string(),
-                kind: None,
-                returns: None,
-                takes: None,
+                kind,
+                returns,
+                takes,
                 all: false,
                 doc: false,
                 limit,
-                workspace_only: false,
-                deps_only: false,
+                workspace_only,
+                deps_only,
                 path: path_opt,
-                specific_crate: None,
+                specific_crate,
             };
 
             match CrossSearcher::find(&find_args, &cache) {
@@ -608,6 +716,38 @@ fn execute_tool(name: &str, args: &Value) -> (String, bool) {
                     Ok(index) => (tokens::render_crate_context_impact(&index), false),
                     Err(err) => (format!("Error analyzing tokens: {:#}", err), true),
                 }
+            }
+        }
+
+        "cratemd_outline" => {
+            let crate_name = match args.get("crate_name").and_then(|c| c.as_str()) {
+                Some(c) => c,
+                None => return ("Missing 'crate_name' argument".to_string(), true),
+            };
+            let max_depth = args.get("max_depth").and_then(|d| d.as_u64()).unwrap_or(4) as usize;
+
+            match load_index(crate_name) {
+                Ok(index) => {
+                    let outline = DocGenerator::generate_outline(&index, max_depth);
+                    (outline, false)
+                }
+                Err(err) => (format!("Error loading crate '{}': {:#}", crate_name, err), true),
+            }
+        }
+
+        "cratemd_examples" => {
+            let crate_name = match args.get("crate_name").and_then(|c| c.as_str()) {
+                Some(c) => c,
+                None => return ("Missing 'crate_name' argument".to_string(), true),
+            };
+            let query = args.get("query").and_then(|q| q.as_str());
+
+            match load_index(crate_name) {
+                Ok(index) => {
+                    let examples = DocGenerator::render_examples(&index, query);
+                    (examples, false)
+                }
+                Err(err) => (format!("Error loading crate '{}': {:#}", crate_name, err), true),
             }
         }
 

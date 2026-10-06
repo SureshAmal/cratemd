@@ -188,6 +188,10 @@ pub struct ViewArgs {
 
     /// Symbol name or path to inspect (e.g. "Serialize", "tokio::task::spawn")
     pub symbol: String,
+
+    /// Include exact source code implementation block
+    #[arg(short = 'b', long = "body")]
+    pub body: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -341,6 +345,13 @@ pub struct WarmArgs {
 pub struct FileArgs {
     /// Path to the .rs file to analyze
     pub path: PathBuf,
+
+    /// Optional symbol or function name to inspect specifically within this file
+    pub symbol: Option<String>,
+
+    /// Include exact source code implementation block
+    #[arg(short = 'b', long = "body")]
+    pub body: bool,
 }
 
 #[derive(Args, Debug, Clone)]

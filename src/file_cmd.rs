@@ -142,6 +142,64 @@ impl SingleFileReport {
             &self.items,
         )
     }
+
+    pub fn render_symbol(&self, symbol_query: &str, include_body: bool) -> String {
+        let q = symbol_query.trim();
+        let q_lower = q.to_lowercase();
+
+        let matched: Vec<&FileItem> = self.items.iter().filter(|it| {
+            it.name == q
+                || it.name.eq_ignore_ascii_case(q)
+                || it.name.to_lowercase().contains(&q_lower)
+                || it.details.iter().any(|d| d.to_lowercase().contains(&q_lower))
+        }).collect();
+
+        if matched.is_empty() {
+            let available: Vec<&str> = self.items.iter().map(|it| it.name.as_str()).take(15).collect();
+            let more = if self.items.len() > 15 {
+                format!(" and {} more", self.items.len() - 15)
+            } else {
+                String::new()
+            };
+            return format!(
+                "Symbol '{}' not found in '{}'. Available symbols: {}{}.\nTip: Run `cratemd file {}` to see full outline.",
+                q, self.file_path, available.join(", "), more, self.file_path
+            );
+        }
+
+        let mut out = String::new();
+        let raw_content = fs::read_to_string(&self.absolute_path).or_else(|_| fs::read_to_string(&self.file_path)).ok();
+        let raw_lines: Vec<&str> = raw_content.as_deref().map(|c| c.lines().collect()).unwrap_or_default();
+
+        for it in matched {
+            let _ = writeln!(out, "# {} `{}` in `{}:{}-{}`\n", it.kind, it.name, self.file_path, it.line_start, it.line_end);
+            let _ = writeln!(out, "**Visibility:** `{}`", it.visibility);
+            let _ = writeln!(out, "**Lines:** L{}-L{} ({} lines)\n", it.line_start, it.line_end, it.line_end.saturating_sub(it.line_start) + 1);
+
+            if let Some(ref doc) = it.doc {
+                let _ = writeln!(out, "## Documentation\n{}\n", doc);
+            }
+
+            let _ = writeln!(out, "## Signature\n```rust\n{}\n```\n", it.signature);
+
+            if !it.details.is_empty() {
+                let _ = writeln!(out, "## Members / Details ({})\n", it.details.len());
+                let _ = writeln!(out, "```rust");
+                for d in &it.details {
+                    let _ = writeln!(out, "    {}", d);
+                }
+                let _ = writeln!(out, "```\n");
+            }
+
+            if include_body && !raw_lines.is_empty() && it.line_start > 0 && it.line_start <= raw_lines.len() {
+                let end = it.line_end.min(raw_lines.len());
+                let body_slice = raw_lines[it.line_start - 1..end].join("\n");
+                let _ = writeln!(out, "## Implementation (L{}-L{})\n```rust\n{}\n```\n", it.line_start, end, body_slice);
+            }
+        }
+
+        out
+    }
 }
 
 fn extract_syn_items(file: &syn::File, _raw_content: &str) -> (Option<String>, Vec<FileItem>) {
@@ -519,6 +577,13 @@ impl TestConfig {
         assert_eq!(report.items.iter().filter(|i| i.kind == "enum").count(), 1);
         assert_eq!(report.items.iter().filter(|i| i.kind == "fn").count(), 1);
         assert_eq!(report.items.iter().filter(|i| i.kind == "impl").count(), 1);
+
+        let sym_output = report.render_symbol("run_server", true);
+        assert!(sym_output.contains("run_server"));
+        assert!(sym_output.contains("pub fn run_server"));
+
+        let not_found = report.render_symbol("nonexistent", false);
+        assert!(not_found.contains("not found"));
 
         let _ = fs::remove_file(test_file);
     }

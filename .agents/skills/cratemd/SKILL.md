@@ -28,13 +28,14 @@ To maximize context efficiency and prevent context window exhaustion, follow the
 
 1. **Never read a raw `.rs` file with `read_file` or `cat` without first checking `cratemd_file`**:
    - `cratemd_file` extracts structs, enums, traits, functions, methods, doc summaries, and exact line ranges (`L14-L26`).
+   - Query specific symbols (`cratemd_file({ "path": "...", "symbol": "foo" })`) and extract source definitions directly with `"include_body": true`.
    - Saves 70% to 90% in tokens compared to reading the full file.
-   - Once you locate the specific line range needed, read only those exact lines.
 2. **Start with `cratemd_cheat` instead of `cratemd_doc`**:
    - `cratemd_cheat` yields an ultra-condensed ~500-token summary of key types and functions.
    - Only call `cratemd_doc` when you genuinely require full API documentation for the entire crate.
 3. **Use `cratemd_view` for surgical symbol lookups**:
    - When you need a specific method signature, field list, or doc example, query `cratemd_view` with the symbol name instead of grepping source files.
+   - Pass `"include_body": true` (or CLI `--body`) to extract the complete function or struct source implementation directly.
 4. **Use `cratemd_impls` to see trait implementations**:
    - Quickly find what traits a struct implements (e.g. `Serialize`, `Stream`, `Service`) or what types implement a given trait.
 5. **Use `cratemd_tokens` before querying large crates**:
@@ -45,15 +46,19 @@ To maximize context efficiency and prevent context window exhaustion, follow the
 ## Tool Reference & Workflows
 
 ### 1. Single File Read & Analysis
-Outline an individual `.rs` file to see all types, functions, methods, docstrings, and line ranges.
+Outline an individual `.rs` file to see all types, functions, methods, docstrings, and line ranges. Optionally query a specific symbol and extract its full source body directly.
 
 - **MCP Tool**:
   ```json
   cratemd_file({ "path": "src/analyzer.rs" })
+  cratemd_file({ "path": "src/analyzer.rs", "symbol": "parse_item" })
+  cratemd_file({ "path": "src/analyzer.rs", "symbol": "parse_item", "include_body": true })
   ```
 - **CLI Equivalent**:
   ```bash
   cratemd file src/analyzer.rs
+  cratemd file src/analyzer.rs parse_item
+  cratemd file src/analyzer.rs parse_item --body
   # Or shorthand
   cratemd src/analyzer.rs
   ```
@@ -93,11 +98,14 @@ List resolved dependencies from `Cargo.lock` with versions, usage counts, and of
 ---
 
 ### 4. Cross-Project Search
-Search symbols simultaneously across local workspace crates and all external dependencies.
+Search symbols simultaneously across local workspace crates and all external dependencies with kind and signature filters.
 
 - **MCP Tool**:
   ```json
   cratemd_find({ "query": "process_frame", "limit": 20 })
+  cratemd_find({ "query": "parse", "kind": "fn", "workspace_only": true })
+  cratemd_find({ "returns": "Result", "takes": "TcpStream" })
+  cratemd_find({ "query": "Config", "specific_crate": "tokio" })
   ```
 - **CLI Equivalent**:
   ```bash
@@ -106,6 +114,7 @@ Search symbols simultaneously across local workspace crates and all external dep
   cratemd find process_frame -d        # dependencies only
   cratemd find --returns Result        # filter by return type
   cratemd find --takes TcpStream       # filter by parameter type
+  cratemd find --kind fn               # filter by symbol kind
   ```
 
 ---
@@ -143,15 +152,17 @@ Search for symbols, methods, or docstrings within a specific crate.
 ---
 
 ### 7. Inspect Specific Symbol in Detail
-View full declarations, trait implementations, methods, and documentation for a single item.
+View full declarations, trait implementations, methods, and documentation for a single item. Optionally extract the entire source body implementation.
 
 - **MCP Tool**:
   ```json
   cratemd_view({ "crate_name": "sonora", "symbol": "AudioProcessing::process_capture_i16" })
+  cratemd_view({ "crate_name": "sonora", "symbol": "AudioProcessing::process_capture_i16", "include_body": true })
   ```
 - **CLI Equivalent**:
   ```bash
   cratemd view sonora "AudioProcessing::process_capture_i16"
+  cratemd view sonora "AudioProcessing::process_capture_i16" --body
   ```
 
 ---
@@ -248,21 +259,47 @@ Measure token counts across cheat sheets, outlines, and documentation before que
 
 ---
 
-### 14. Additional CLI Utilities
+### 14. Hierarchical Module Outline Tree
+Inspect a crate's module tree hierarchy with optional depth limiting.
+
+- **MCP Tool**:
+  ```json
+  cratemd_outline({ "crate_name": "tokio" })
+  cratemd_outline({ "crate_name": "tokio", "max_depth": 2 })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd outline tokio
+  cratemd outline tokio --max-depth 2
+  ```
+
+---
+
+### 15. Extract Runnable Code Examples
+Extract runnable code snippets from crate docstrings and the `examples/` directory.
+
+- **MCP Tool**:
+  ```json
+  cratemd_examples({ "crate_name": "tokio" })
+  cratemd_examples({ "crate_name": "tokio", "filter": "tcp" })
+  ```
+- **CLI Equivalent**:
+  ```bash
+  cratemd examples tokio
+  cratemd examples tokio tcp
+  ```
+
+---
+
+### 16. Additional CLI Utilities
 The CLI supports specialized indexing utilities:
 
 ```bash
-# Hierarchical module tree
-cratemd outline <crate_name> [--max-depth N]
-
 # Universal Ctags generation
 cratemd ctags <crate_name> [--out tags]
 
 # Tree-sitter AST syntax outline or S-expressions
 cratemd treesitter <crate_name> [relative/path/to/file.rs] [--sexp]
-
-# Extract runnable code examples from docs and examples/
-cratemd examples <crate_name> [keyword]
 
 # Pre-warm local cache for zero-latency queries
 cratemd warm --all

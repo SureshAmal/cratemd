@@ -217,8 +217,12 @@ impl DocGenerator {
         out
     }
 
-    /// Renders detailed view of a single symbol
-    pub fn render_symbol_detail(sym: &Symbol) -> String {
+    /// Renders detailed view of a single symbol with optional source body extraction
+    pub fn render_symbol_detail_with_source(
+        sym: &Symbol,
+        crate_root: Option<&std::path::Path>,
+        include_body: bool,
+    ) -> String {
         let mut out = String::new();
         let _ = writeln!(out, "# {} ({})\n", sym.id, sym.kind.as_str());
         let _ = writeln!(out, "**File:** `{}:{}`", sym.file_path, sym.line_start);
@@ -275,6 +279,26 @@ impl DocGenerator {
             let _ = writeln!(out, "## Examples\n");
             for ex in &sym.examples {
                 let _ = writeln!(out, "### {}\n```rust\n{}\n```\n", ex.title, ex.code);
+            }
+        }
+
+        if include_body {
+            if let Some(root) = crate_root {
+                let candidate = root.join(&sym.file_path);
+                let target_path = if candidate.exists() {
+                    candidate
+                } else {
+                    std::path::PathBuf::from(&sym.file_path)
+                };
+                if let Ok(content) = std::fs::read_to_string(&target_path) {
+                    let lines: Vec<&str> = content.lines().collect();
+                    if sym.line_start > 0 && sym.line_start <= lines.len() {
+                        let end = sym.line_end.min(lines.len());
+                        let body_slice = lines[sym.line_start - 1..end].join("\n");
+                        let _ = writeln!(out, "## Source Implementation (L{}-L{})\n", sym.line_start, end);
+                        let _ = writeln!(out, "```rust\n{}\n```\n", body_slice);
+                    }
+                }
             }
         }
 

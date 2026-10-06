@@ -112,7 +112,7 @@ fn run() -> Result<()> {
                 // If target is a single .rs file, analyze that file
                 let file_path = Path::new(&crate_name);
                 if (file_path.is_file() && file_path.extension().map_or(false, |e| e == "rs")) || crate_name.ends_with(".rs") {
-                    return handle_file(FileArgs { path: file_path.to_path_buf() }, &cli);
+                    return handle_file(FileArgs { path: file_path.to_path_buf(), symbol: None, body: false }, &cli);
                 }
 
                 // If the target is a workspace root, show workspace blueprint
@@ -357,7 +357,7 @@ fn handle_view(args: ViewArgs, cli: &Cli, refresh: bool, no_cache: bool) -> Resu
         return Ok(());
     }
 
-    let detail = DocGenerator::render_symbol_detail(sym);
+    let detail = DocGenerator::render_symbol_detail_with_source(sym, Some(&index.info.root_dir), args.body);
     print_output(detail, cli);
     Ok(())
 }
@@ -732,7 +732,17 @@ fn handle_warm(args: WarmArgs, cli: &Cli, refresh: bool) -> Result<()> {
 fn handle_file(args: FileArgs, cli: &Cli) -> Result<()> {
     let report = FileAnalyzer::analyze(&args.path)?;
     if cli.json {
-        print_output(serde_json::to_string_pretty(&report)?, cli);
+        if let Some(ref sym) = args.symbol {
+            let q = sym.to_lowercase();
+            let matched: Vec<_> = report.items.iter().filter(|it| {
+                it.name == *sym || it.name.to_lowercase().contains(&q) || it.details.iter().any(|d| d.to_lowercase().contains(&q))
+            }).collect();
+            print_output(serde_json::to_string_pretty(&matched)?, cli);
+        } else {
+            print_output(serde_json::to_string_pretty(&report)?, cli);
+        }
+    } else if let Some(ref sym) = args.symbol {
+        print_output(report.render_symbol(sym, args.body || true), cli);
     } else {
         print_output(report.render_ascii(), cli);
     }
