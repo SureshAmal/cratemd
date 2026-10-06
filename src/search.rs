@@ -25,7 +25,10 @@ pub struct CrateSearcher;
 impl CrateSearcher {
     pub fn search(index: &CrateIndex, query: &SearchQuery) -> Vec<SearchHit> {
         let q = query.text.to_lowercase().trim().to_string();
-        let tokens: Vec<&str> = q.split_whitespace().collect();
+        let tokens: Vec<&str> = q
+            .split(|c: char| c.is_whitespace() || c == '_' || c == '-')
+            .filter(|s| !s.is_empty())
+            .collect();
         let ret_filter = query.returns_filter.as_ref().map(|s| s.to_lowercase().trim().to_string());
         let takes_filter = query.takes_filter.as_ref().map(|s| s.to_lowercase().trim().to_string());
 
@@ -173,12 +176,46 @@ fn score_symbol(
         matched_in.push("substring_name");
     }
 
-    if id_lower.contains(q) && !matched_in.contains(&"exact_name") && !matched_in.contains(&"substring_name") {
-        score += 40;
-        matched_in.push("path");
+    // Normalized matching (ignoring `_` and `-` for snake_case / kebab-case / CamelCase interoperability)
+    let q_norm = q.replace(['_', '-'], "");
+    let name_norm = name_lower.replace(['_', '-'], "");
+    let id_norm = id_lower.replace(['_', '-'], "");
+
+    if !q_norm.is_empty() {
+        if name_norm == q_norm && !matched_in.contains(&"exact_name") {
+            score += 95;
+            matched_in.push("exact_name_normalized");
+        } else if name_norm.starts_with(&q_norm)
+            && !matched_in.contains(&"prefix_name")
+            && !matched_in.contains(&"exact_name_normalized")
+        {
+            score += 65;
+            matched_in.push("prefix_name_normalized");
+        } else if name_norm.contains(&q_norm)
+            && !matched_in.contains(&"substring_name")
+            && !matched_in.contains(&"prefix_name_normalized")
+            && !matched_in.contains(&"exact_name_normalized")
+        {
+            score += 45;
+            matched_in.push("substring_name_normalized");
+        }
     }
 
-    if (query.search_signatures || score == 0) && sig_lower.contains(q) {
+    if id_lower.contains(q)
+        && !matched_in.contains(&"exact_name")
+        && !matched_in.contains(&"substring_name")
+        && !matched_in.contains(&"exact_name_normalized")
+    {
+        score += 40;
+        matched_in.push("path");
+    } else if !q_norm.is_empty() && id_norm.contains(&q_norm) && score == 0 {
+        score += 35;
+        matched_in.push("path_normalized");
+    }
+
+    if (query.search_signatures || score == 0)
+        && (sig_lower.contains(q) || (!q_norm.is_empty() && sig_lower.replace(['_', '-'], "").contains(&q_norm)))
+    {
         score += 25;
         matched_in.push("signature");
     }
@@ -188,11 +225,15 @@ fn score_symbol(
         matched_in.push("doc");
     }
 
-    // 2. Multi-token scoring if there are multiple words (e.g. "json parse")
+    // 2. Multi-token scoring if there are multiple words/tokens (e.g. "json parse", "single_file")
     if tokens.len() > 1 {
         let mut tokens_found = 0;
         for &tok in tokens {
-            if name_lower.contains(tok) || sig_lower.contains(tok) || (query.search_docs && doc_lower.contains(tok)) {
+            if name_lower.contains(tok)
+                || name_norm.contains(tok)
+                || sig_lower.contains(tok)
+                || (query.search_docs && doc_lower.contains(tok))
+            {
                 tokens_found += 1;
             }
         }
@@ -205,4 +246,49 @@ fn score_symbol(
     }
 
     (score, matched_in)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Symbol, SymbolKind, Visibility};
+
+    #[test]
+    fn test_snake_case_matches_camel_case() {
+        let sym = Symbol::new(
+            "SingleFileReport".to_string(),
+            "cratemd::file_cmd::SingleFileReport".to_string(),
+            SymbolKind::Struct,
+            Visibility::Public,
+            "pub struct SingleFileReport".to_string(),
+            "src/file_cmd.rs".to_string(),
+            14,
+            26,
+        );
+
+        let query = SearchQuery {
+            text: "single_file".to_string(),
+            limit: 10,
+            search_docs: false,
+            search_signatures: false,
+            pub_only: false,
+            returns_filter: None,
+            takes_filter: None,
+            kind_filter: None,
+        };
+
+        let q = query.text.to_lowercase();
+        let tokens: Vec<&str> = q
+            .split(|c: char| c.is_whitespace() || c == '_' || c == '-')
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let (score, matched_in) = score_symbol(&sym, &q, &tokens, &query);
+        assert!(score > 0, "Expected positive score for snake_case match against CamelCase");
+        assert!(
+            matched_in.contains(&"prefix_name_normalized")
+                || matched_in.contains(&"all_tokens")
+                || matched_in.contains(&"substring_name_normalized")
+        );
+    }
 }

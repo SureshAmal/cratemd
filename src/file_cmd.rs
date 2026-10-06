@@ -37,15 +37,74 @@ pub struct FileItem {
     pub details: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectoryReport {
+    pub dir_path: String,
+    pub absolute_path: PathBuf,
+    pub total_files: usize,
+    pub total_lines_of_code: usize,
+    pub total_file_bytes: usize,
+    pub total_full_tokens: usize,
+    pub total_outline_tokens: usize,
+    pub token_savings_pct: f64,
+    pub files: Vec<SingleFileReport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum FileReport {
+    Single(SingleFileReport),
+    Directory(DirectoryReport),
+}
+
+impl FileReport {
+    pub fn render_ascii(&self) -> String {
+        match self {
+            Self::Single(r) => r.render_ascii(),
+            Self::Directory(d) => d.render_ascii(),
+        }
+    }
+
+    pub fn render_symbol(&self, symbol_query: &str, include_body: bool) -> String {
+        match self {
+            Self::Single(r) => r.render_symbol(symbol_query, include_body),
+            Self::Directory(d) => d.render_symbol(symbol_query, include_body),
+        }
+    }
+
+    pub fn items(&self) -> Vec<&FileItem> {
+        match self {
+            Self::Single(r) => r.items.iter().collect(),
+            Self::Directory(d) => d.files.iter().flat_map(|f| &f.items).collect(),
+        }
+    }
+}
+
 pub struct FileAnalyzer;
 
 impl FileAnalyzer {
-    pub fn analyze(path: &Path) -> Result<SingleFileReport> {
+    pub fn analyze(path: &Path) -> Result<FileReport> {
+        if !path.exists() {
+            bail!("Path not found: {}", path.display());
+        }
+
+        if path.is_file() {
+            let single = Self::analyze_file(path)?;
+            Ok(FileReport::Single(single))
+        } else if path.is_dir() {
+            let dir = Self::analyze_dir(path)?;
+            Ok(FileReport::Directory(dir))
+        } else {
+            bail!("Unsupported path type: {}", path.display());
+        }
+    }
+
+    pub fn analyze_file(path: &Path) -> Result<SingleFileReport> {
         if !path.exists() {
             bail!("File not found: {}", path.display());
         }
         if !path.is_file() {
-            bail!("Path is a directory, not a file: {}. Use `cratemd` or `cratemd outline` for crates.", path.display());
+            bail!("Path is a directory, not a file: {}. Use `cratemd file` on directory or crate root.", path.display());
         }
 
         let content = fs::read_to_string(path)
@@ -115,6 +174,56 @@ impl FileAnalyzer {
                 })
             }
         }
+    }
+
+    pub fn analyze_dir(path: &Path) -> Result<DirectoryReport> {
+        if !path.exists() {
+            bail!("Directory not found: {}", path.display());
+        }
+        if !path.is_dir() {
+            bail!("Path is not a directory: {}", path.display());
+        }
+
+        let rs_paths = collect_rs_files(path, 6);
+        if rs_paths.is_empty() {
+            bail!("No Rust (.rs) files found in directory: {}", path.display());
+        }
+
+        let mut files = Vec::new();
+        for p in rs_paths {
+            if let Ok(report) = Self::analyze_file(&p) {
+                files.push(report);
+            }
+        }
+
+        if files.is_empty() {
+            bail!("Failed to parse any Rust files in directory: {}", path.display());
+        }
+
+        let total_files = files.len();
+        let total_lines_of_code = files.iter().map(|f| f.lines_of_code).sum();
+        let total_file_bytes = files.iter().map(|f| f.file_bytes).sum();
+        let total_full_tokens = files.iter().map(|f| f.full_file_tokens).sum();
+        let total_outline_tokens = files.iter().map(|f| f.outline_tokens).sum();
+        let token_savings_pct = if total_full_tokens > 0 {
+            (1.0 - (total_outline_tokens as f64 / total_full_tokens as f64)) * 100.0
+        } else {
+            0.0
+        };
+
+        let abs_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+        Ok(DirectoryReport {
+            dir_path: path.to_string_lossy().to_string(),
+            absolute_path: abs_path,
+            total_files,
+            total_lines_of_code,
+            total_file_bytes,
+            total_full_tokens,
+            total_outline_tokens,
+            token_savings_pct: token_savings_pct.max(0.0),
+            files,
+        })
     }
 }
 
@@ -199,6 +308,116 @@ impl SingleFileReport {
         }
 
         out
+    }
+}
+
+impl DirectoryReport {
+    pub fn render_ascii(&self) -> String {
+        let mut out = String::new();
+        let _ = writeln!(
+            out,
+            "# Directory Outline: `{}` ({} Rust files, {} lines, ~{} full tokens -> ~{} outline tokens, {:.1}% token savings)\n",
+            self.dir_path,
+            self.total_files,
+            self.total_lines_of_code,
+            self.total_full_tokens,
+            self.total_outline_tokens,
+            self.token_savings_pct,
+        );
+
+        let _ = writeln!(out, "| File | Lines | Tokens | Symbols | Key Exports |");
+        let _ = writeln!(out, "|------|-------|--------|---------|-------------|");
+
+        for f in &self.files {
+            let key_exports: Vec<&str> = f
+                .items
+                .iter()
+                .filter(|it| it.visibility == "pub")
+                .map(|it| it.name.as_str())
+                .take(4)
+                .collect();
+            let exports_str = if key_exports.is_empty() {
+                "-".to_string()
+            } else {
+                key_exports.join(", ")
+            };
+            let _ = writeln!(
+                out,
+                "| `{}` | {} | ~{} | {} | {} |",
+                f.file_path,
+                f.lines_of_code,
+                f.outline_tokens,
+                f.items.len(),
+                exports_str
+            );
+        }
+
+        let _ = writeln!(
+            out,
+            "\nTip: Run `cratemd file <path/to/file.rs>` to see complete items and docstrings for a file."
+        );
+        out
+    }
+
+    pub fn render_symbol(&self, symbol_query: &str, include_body: bool) -> String {
+        let q_lower = symbol_query.to_lowercase();
+        let mut matching_files = 0;
+        let mut out = String::new();
+
+        for f in &self.files {
+            let has_match = f.items.iter().any(|it| {
+                it.name == symbol_query
+                    || it.name.eq_ignore_ascii_case(symbol_query)
+                    || it.name.to_lowercase().contains(&q_lower)
+                    || it.details.iter().any(|d| d.to_lowercase().contains(&q_lower))
+            });
+
+            if has_match {
+                matching_files += 1;
+                out.push_str(&f.render_symbol(symbol_query, include_body));
+                out.push('\n');
+            }
+        }
+
+        if matching_files == 0 {
+            format!(
+                "Symbol '{}' not found across {} files in directory '{}'.",
+                symbol_query, self.total_files, self.dir_path
+            )
+        } else {
+            out
+        }
+    }
+}
+
+fn collect_rs_files(dir: &Path, max_depth: usize) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    collect_rs_files_recursive(dir, 0, max_depth, &mut files);
+    files.sort();
+    files
+}
+
+fn collect_rs_files_recursive(dir: &Path, depth: usize, max_depth: usize, acc: &mut Vec<PathBuf>) {
+    if depth > max_depth {
+        return;
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if file_name.starts_with('.') || file_name == "target" || file_name == "node_modules" {
+            continue;
+        }
+
+        if path.is_file() && path.extension().is_some_and(|e| e == "rs") {
+            acc.push(path);
+        } else if path.is_dir() {
+            collect_rs_files_recursive(&path, depth + 1, max_depth, acc);
+        }
     }
 }
 
@@ -568,7 +787,7 @@ impl TestConfig {
 }
 "#;
         fs::write(&test_file, code).unwrap();
-        let report = FileAnalyzer::analyze(&test_file).unwrap();
+        let report = FileAnalyzer::analyze_file(&test_file).unwrap();
 
         assert_eq!(report.lines_of_code, code.lines().count());
         assert!(report.parsed_with_syn);
@@ -585,6 +804,32 @@ impl TestConfig {
         let not_found = report.render_symbol("nonexistent", false);
         assert!(not_found.contains("not found"));
 
-        let _ = fs::remove_file(test_file);
+        let _ = fs::remove_file(&test_file);
+    }
+
+    #[test]
+    fn test_analyze_directory() {
+        let temp_dir = std::env::temp_dir().join("cratemd_dir_test");
+        let _ = fs::create_dir_all(&temp_dir);
+
+        let file1 = temp_dir.join("mod_a.rs");
+        let file2 = temp_dir.join("mod_b.rs");
+
+        fs::write(&file1, "pub struct Alpha { pub id: usize }\npub fn alpha_fn() {}").unwrap();
+        fs::write(&file2, "pub struct Beta { pub count: u32 }\npub fn beta_fn() {}").unwrap();
+
+        let report = FileAnalyzer::analyze_dir(&temp_dir).unwrap();
+        assert_eq!(report.total_files, 2);
+        assert!(report.total_lines_of_code >= 4);
+
+        let ascii = report.render_ascii();
+        assert!(ascii.contains("Directory Outline"));
+        assert!(ascii.contains("mod_a.rs"));
+        assert!(ascii.contains("mod_b.rs"));
+
+        let sym_output = report.render_symbol("alpha_fn", false);
+        assert!(sym_output.contains("alpha_fn"));
+
+        let _ = fs::remove_dir_all(temp_dir);
     }
 }

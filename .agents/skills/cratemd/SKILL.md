@@ -45,19 +45,21 @@ To maximize context efficiency and prevent context window exhaustion, follow the
 
 ## Tool Reference & Workflows
 
-### 1. Single File Read & Analysis
-Outline an individual `.rs` file to see all types, functions, methods, docstrings, and line ranges. Optionally query a specific symbol and extract its full source body directly.
+### 1. File & Directory Source Analysis
+Outline an individual `.rs` file or an entire directory of Rust files to see all types, functions, methods, docstrings, line ranges, and aggregate token savings (85-95%). Optionally query a specific symbol across the file or directory and extract its full source body directly.
 
 - **MCP Tool**:
   ```json
   cratemd_file({ "path": "src/analyzer.rs" })
-  cratemd_file({ "path": "src/analyzer.rs", "symbol": "parse_item" })
+  cratemd_file({ "path": "src" })
+  cratemd_file({ "path": "src", "symbol": "FileAnalyzer" })
   cratemd_file({ "path": "src/analyzer.rs", "symbol": "parse_item", "include_body": true })
   ```
 - **CLI Equivalent**:
   ```bash
   cratemd file src/analyzer.rs
-  cratemd file src/analyzer.rs parse_item
+  cratemd file src/
+  cratemd file src FileAnalyzer
   cratemd file src/analyzer.rs parse_item --body
   # Or shorthand
   cratemd src/analyzer.rs

@@ -726,7 +726,7 @@ fn handle_file(args: FileArgs, cli: &Cli) -> Result<()> {
     if cli.json {
         if let Some(ref sym) = args.symbol {
             let q = sym.to_lowercase();
-            let matched: Vec<_> = report.items.iter().filter(|it| {
+            let matched: Vec<_> = report.items().into_iter().filter(|it| {
                 it.name == *sym || it.name.to_lowercase().contains(&q) || it.details.iter().any(|d| d.to_lowercase().contains(&q))
             }).collect();
             print_output(serde_json::to_string_pretty(&matched)?, cli);

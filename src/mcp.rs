@@ -228,17 +228,17 @@ fn get_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "cratemd_file",
-            "description": "Read and analyze a single Rust source file (.rs), extracting all structs, enums, traits, functions, methods, and line numbers with token savings",
+            "description": "Read and analyze a Rust source file (.rs) or directory of Rust files, extracting outlines, structs, enums, traits, functions, methods, and line numbers with token savings",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Relative or absolute path to the .rs file"
+                        "description": "Relative or absolute path to the .rs file or directory"
                     },
                     "symbol": {
                         "type": "string",
-                        "description": "Optional symbol or function name to inspect specifically within this file"
+                        "description": "Optional symbol or function name to inspect specifically within this file or directory"
                     },
                     "include_body": {
                         "type": "boolean",
