@@ -239,9 +239,9 @@ fn expand_member_pattern(root: &Path, pattern: &str, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Parses Cargo.lock and returns a map of (crate_name -> exact_version).
-pub fn parse_lockfile(lockfile_path: &Path) -> HashMap<String, String> {
-    let mut map = HashMap::new();
+/// Parses Cargo.lock and returns every resolved version for each crate name.
+pub fn parse_lockfile(lockfile_path: &Path) -> HashMap<String, Vec<String>> {
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
     if !lockfile_path.exists() {
         return map;
     }
@@ -260,12 +260,48 @@ pub fn parse_lockfile(lockfile_path: &Path) -> HashMap<String, String> {
                 pkg.get("name").and_then(|n| n.as_str()),
                 pkg.get("version").and_then(|v| v.as_str()),
             ) {
-                map.insert(name.to_string(), version.to_string());
+                let versions = map.entry(name.to_string()).or_default();
+                if !versions.iter().any(|existing| existing == version) {
+                    versions.push(version.to_string());
+                }
             }
         }
     }
 
+    for versions in map.values_mut() {
+        versions.sort();
+    }
     map
+}
+
+/// Returns the versions linked directly from one package's lockfile entry.
+pub fn parse_locked_package_deps(lockfile_path: &Path, package_name: &str, package_version: &str) -> HashMap<String, Vec<String>> {
+    let Ok(content) = std::fs::read_to_string(lockfile_path) else {
+        return HashMap::new();
+    };
+    let Ok(value) = toml::from_str::<toml::Value>(&content) else {
+        return HashMap::new();
+    };
+    let mut result: HashMap<String, Vec<String>> = HashMap::new();
+    let Some(packages) = value.get("package").and_then(|p| p.as_array()) else {
+        return result;
+    };
+    for package in packages {
+        if package.get("name").and_then(|n| n.as_str()) != Some(package_name)
+            || package.get("version").and_then(|v| v.as_str()) != Some(package_version) {
+            continue;
+        }
+        if let Some(dependencies) = package.get("dependencies").and_then(|d| d.as_array()) {
+            for dependency in dependencies.iter().filter_map(|d| d.as_str()) {
+                let mut parts = dependency.split_whitespace();
+                if let (Some(name), Some(version)) = (parts.next(), parts.next()) {
+                    result.entry(name.to_string()).or_default().push(version.to_string());
+                }
+            }
+        }
+        break;
+    }
+    result
 }
 
 #[cfg(test)]
@@ -290,5 +326,13 @@ mod tests {
         let map = parse_lockfile(Path::new("/nonexistent/Cargo.lock"));
         assert!(map.is_empty());
     }
-}
 
+    #[test]
+    fn test_parse_lockfile_keeps_multiple_versions() {
+        let path = std::env::temp_dir().join(format!("cratemd-lockfile-test-{}-{:?}.lock", std::process::id(), std::thread::current().id()));
+        std::fs::write(&path, "[[package]]\nname = \"demo\"\nversion = \"2.0.0\"\n\n[[package]]\nname = \"demo\"\nversion = \"1.0.0\"\n").unwrap();
+        let map = parse_lockfile(&path);
+        assert_eq!(map.get("demo"), Some(&vec!["1.0.0".to_string(), "2.0.0".to_string()]));
+        std::fs::remove_file(path).unwrap();
+    }
+}

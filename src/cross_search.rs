@@ -75,8 +75,11 @@ impl CrossSearcher {
                                     && dep_name != filter_crate {
                                         continue;
                                     }
-                                let resolved_ver = lockfile_map.get(dep_name).cloned();
-                                dep_specs.push((dep_name.clone(), resolved_ver));
+                                if let Some(versions) = lockfile_map.get(dep_name) {
+                                    dep_specs.extend(versions.iter().cloned().map(|version| (dep_name.clone(), Some(version))));
+                                } else {
+                                    dep_specs.push((dep_name.clone(), None));
+                                }
                             }
                         }
                     }
@@ -102,8 +105,11 @@ impl CrossSearcher {
                             && dep != filter_crate {
                                 continue;
                             }
-                        let resolved_ver = lock_map.get(dep).cloned();
-                        dep_specs.push((dep.clone(), resolved_ver));
+                        if let Some(versions) = lock_map.get(dep) {
+                            dep_specs.extend(versions.iter().cloned().map(|version| (dep.clone(), Some(version))));
+                        } else {
+                            dep_specs.push((dep.clone(), None));
+                        }
                     }
                 }
             }
@@ -192,7 +198,9 @@ impl CrossSearcher {
         all_hits.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.origin_crate.cmp(&b.origin_crate)));
 
         // Deduplicate
-        all_hits.dedup_by(|a, b| a.symbol.id == b.symbol.id && a.origin_crate == b.origin_crate);
+        all_hits.dedup_by(|a, b| a.symbol.id == b.symbol.id
+            && a.origin_crate == b.origin_crate
+            && a.origin_version == b.origin_version);
 
         if all_hits.len() > args.limit {
             all_hits.truncate(args.limit);

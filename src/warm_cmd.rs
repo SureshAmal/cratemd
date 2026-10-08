@@ -190,9 +190,9 @@ fn collect_from_directory(
             if lock_path.exists() {
                 let lock_map = parse_lockfile(&lock_path);
                 let member_names: BTreeSet<&str> = ws.members.iter().map(|m| m.name.as_str()).collect();
-                for (dep, ver) in lock_map {
+                for (dep, versions) in lock_map {
                     if !member_names.contains(dep.as_str()) {
-                        crates.push(format!("{}@{}", dep, ver));
+                        crates.extend(versions.into_iter().map(|version| format!("{}@{}", dep, version)));
                     }
                 }
             }
@@ -212,8 +212,8 @@ fn collect_from_directory(
             };
 
             for dep in direct_deps {
-                if let Some(ver) = lock_map.get(&dep) {
-                    crates.push(format!("{}@{}", dep, ver));
+                if let Some(versions) = lock_map.get(&dep) {
+                    crates.extend(versions.iter().map(|version| format!("{}@{}", dep, version)));
                 } else {
                     crates.push(dep);
                 }
@@ -232,8 +232,8 @@ fn collect_from_directory(
 
             let mut targets = BTreeSet::new();
             if warm_all {
-                for (dep, ver) in lock_map {
-                    targets.insert(format!("{}@{}", dep, ver));
+                for (dep, versions) in lock_map {
+                    targets.extend(versions.into_iter().map(|version| format!("{}@{}", dep, version)));
                 }
             } else {
                 let mut direct_names = Vec::new();
@@ -244,8 +244,8 @@ fn collect_from_directory(
                     direct_names.extend(deps.keys().cloned());
                 }
                 for dep in direct_names {
-                    if let Some(ver) = lock_map.get(&dep) {
-                        targets.insert(format!("{}@{}", dep, ver));
+                    if let Some(versions) = lock_map.get(&dep) {
+                        targets.extend(versions.iter().map(|version| format!("{}@{}", dep, version)));
                     } else {
                         targets.insert(dep);
                     }
