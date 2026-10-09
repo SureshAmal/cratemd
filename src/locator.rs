@@ -15,15 +15,30 @@ impl CrateLocator {
     /// - "./relative/path/to/crate"
     /// - "/absolute/path/to/crate"
     pub fn locate(crate_spec: &str) -> Result<CrateInfo> {
-        let (name, req_version) = parse_spec(crate_spec);
-
-        // 1. If it's a direct path on disk
-        let direct_path = PathBuf::from(&name);
+        // 1. If it's a direct path on disk (check before parse_spec to preserve Windows drive letters like C:\...)
+        let direct_path = PathBuf::from(crate_spec);
         if direct_path.exists() {
             let manifest = if direct_path.is_file() && direct_path.file_name().is_some_and(|f| f == "Cargo.toml") {
                 direct_path.clone()
             } else {
                 direct_path.join("Cargo.toml")
+            };
+
+            if manifest.exists() {
+                let root_dir = manifest.parent().unwrap().to_path_buf();
+                return parse_cargo_manifest(&root_dir, &manifest);
+            }
+        }
+
+        let (name, req_version) = parse_spec(crate_spec);
+
+        // Also check if parsed name is a direct path (in case spec had a version specifier or trailing separators)
+        let direct_name_path = PathBuf::from(&name);
+        if direct_name_path.exists() {
+            let manifest = if direct_name_path.is_file() && direct_name_path.file_name().is_some_and(|f| f == "Cargo.toml") {
+                direct_name_path.clone()
+            } else {
+                direct_name_path.join("Cargo.toml")
             };
 
             if manifest.exists() {
@@ -38,15 +53,15 @@ impl CrateLocator {
         }
 
         // 3. Search ~/.cargo/registry/src/
-        if let Some(home) = home_dir() {
-            let registry_src = home.join(".cargo/registry/src");
+        if let Some(cargo_home) = cargo_home_dir() {
+            let registry_src = cargo_home.join("registry/src");
             if registry_src.exists()
                 && let Some(info) = search_registry_dirs(&registry_src, &name, req_version.as_deref())? {
                     return Ok(info);
                 }
 
             // 4. Search ~/.cargo/git/checkouts/
-            let git_checkouts = home.join(".cargo/git/checkouts");
+            let git_checkouts = cargo_home.join("git/checkouts");
             if git_checkouts.exists()
                 && let Some(info) = search_git_checkouts(&git_checkouts, &name)? {
                     return Ok(info);
@@ -63,10 +78,10 @@ impl CrateLocator {
     /// List all crates available in the local cargo registry cache.
     pub fn list_cached(filter: Option<&str>) -> Result<Vec<(String, String, PathBuf)>> {
         let mut results = Vec::new();
-        let Some(home) = home_dir() else {
+        let Some(cargo_home) = cargo_home_dir() else {
             return Ok(results);
         };
-        let registry_src = home.join(".cargo/registry/src");
+        let registry_src = cargo_home.join("registry/src");
         if !registry_src.exists() {
             return Ok(results);
         }
@@ -97,18 +112,38 @@ impl CrateLocator {
     }
 }
 
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+fn cargo_home_dir() -> Option<PathBuf> {
+    if let Some(cargo_home) = std::env::var_os("CARGO_HOME") {
+        return Some(PathBuf::from(cargo_home));
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return Some(PathBuf::from(home).join(".cargo"));
+    }
+    if let Some(user_profile) = std::env::var_os("USERPROFILE") {
+        return Some(PathBuf::from(user_profile).join(".cargo"));
+    }
+    None
 }
 
 fn parse_spec(spec: &str) -> (String, Option<String>) {
+    let spec = spec.trim();
     if let Some((name, ver)) = spec.split_once('@') {
         (name.trim().to_string(), Some(ver.trim().to_string()))
-    } else if let Some((name, ver)) = spec.split_once(':') {
+    } else if let Some((name, ver)) = split_colon_spec(spec) {
         (name.trim().to_string(), Some(ver.trim().to_string()))
     } else {
-        (spec.trim().to_string(), None)
+        (spec.to_string(), None)
     }
+}
+
+fn split_colon_spec(spec: &str) -> Option<(&str, &str)> {
+    // If this looks like a Windows drive letter prefix (e.g. C:\ or C:/), don't treat the colon as a version separator
+    let bytes = spec.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        // Windows drive letter; do not split on the first colon
+        return None;
+    }
+    spec.split_once(':')
 }
 
 fn split_crate_version(dir_name: &str) -> Option<(String, String)> {
@@ -398,5 +433,25 @@ mod tests {
         assert_eq!(compare_semver("2.0.0", "1.99.99"), Ordering::Greater);
         assert_eq!(compare_semver("1.0.0", "1.0.0"), Ordering::Equal);
     }
+
+    #[test]
+    fn test_parse_spec_windows_path() {
+        let (name, ver) = parse_spec(r"C:\Users\runneradmin\AppData\Local\Temp\crate");
+        assert_eq!(name, r"C:\Users\runneradmin\AppData\Local\Temp\crate");
+        assert_eq!(ver, None);
+
+        let (name2, ver2) = parse_spec("C:/Users/runneradmin/crate");
+        assert_eq!(name2, "C:/Users/runneradmin/crate");
+        assert_eq!(ver2, None);
+
+        let (name3, ver3) = parse_spec("serde:1.0.0");
+        assert_eq!(name3, "serde");
+        assert_eq!(ver3, Some("1.0.0".to_string()));
+
+        let (name4, ver4) = parse_spec("serde@1.0.0");
+        assert_eq!(name4, "serde");
+        assert_eq!(ver4, Some("1.0.0".to_string()));
+    }
 }
+
 
