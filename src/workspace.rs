@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -210,6 +211,23 @@ impl WorkspaceInfo {
         let _ = writeln!(out, "- Search across entire workspace: `cratemd find <query> -w`");
         let _ = writeln!(out, "- Search workspace & all dependencies: `cratemd find <query>`\n");
 
+        out
+    }
+
+    /// Renders Mermaid diagram of workspace members and internal dependencies
+    pub fn render_mermaid(&self) -> String {
+        let mut out = String::new();
+        let _ = writeln!(out, "```mermaid");
+        let _ = writeln!(out, "graph TD");
+        for m in &self.members {
+            let safe_id = m.name.replace('-', "_");
+            let _ = writeln!(out, "    {}[\"{}\"]", safe_id, m.name);
+            for dep in &m.internal_deps {
+                let dep_id = dep.replace('-', "_");
+                let _ = writeln!(out, "    {} --> {}", safe_id, dep_id);
+            }
+        }
+        let _ = writeln!(out, "```\n");
         out
     }
 }

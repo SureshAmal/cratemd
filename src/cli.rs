@@ -91,6 +91,18 @@ pub enum Commands {
     /// Find all references and usages of a symbol across workspace crates
     Refs(RefsArgs),
 
+    /// Go to definition of a symbol across workspace and dependencies
+    Def(DefArgs),
+
+    /// Trace incoming callers and outgoing calls for a function
+    Calls(CallsArgs),
+
+    /// Hover over a symbol to inspect its signature, documentation, and location
+    Hover(HoverArgs),
+
+    /// Consolidated context: definition, callers/callees, and key references in one single pipelined tool call
+    Context(ContextArgs),
+
     /// Audit dependency health, version splits, and offline cache readiness
     Audit(AuditArgs),
 
@@ -99,6 +111,12 @@ pub enum Commands {
 
     /// Read and analyze a single Rust source file (.rs)
     File(FileArgs),
+
+    /// Initialize offline project context database (.cratemd.db) with workspace architecture and symbols
+    Init(InitArgs),
+
+    /// Read, write, list, or search project memory in .cratemd.db
+    Memory(MemoryArgs),
 
     /// Start Model Context Protocol (MCP) server over stdio for LLMs and agents
     Mcp(McpArgs),
@@ -286,6 +304,66 @@ pub struct DepsCliArgs {
 pub struct WorkspaceCliArgs {
     /// Path to workspace directory (defaults to current directory)
     pub path: Option<PathBuf>,
+
+    /// Output architecture as a Mermaid diagram
+    #[arg(long)]
+    pub mermaid: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DefArgs {
+    /// Symbol name or path to find definition for (e.g. `CrateLocator` or `WorkspaceInfo::load`)
+    pub symbol: String,
+
+    /// Workspace path (defaults to current directory)
+    pub path: Option<PathBuf>,
+
+    /// Require exact name match
+    #[arg(short = 'e', long)]
+    pub exact: bool,
+
+    /// Include source code snippet of definition
+    #[arg(short = 's', long = "snippet")]
+    pub snippet: bool,
+
+    /// Maximum number of matching definitions to return
+    #[arg(short, long, default_value = "10")]
+    pub limit: usize,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct CallsArgs {
+    /// Function or method name to trace calls for
+    pub function: String,
+
+    /// Workspace path (defaults to current directory)
+    pub path: Option<PathBuf>,
+
+    /// Show incoming calls only (who calls this function)
+    #[arg(short = 'i', long)]
+    pub incoming: bool,
+
+    /// Show outgoing calls only (who this function calls)
+    #[arg(short = 'o', long)]
+    pub outgoing: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct HoverArgs {
+    /// Symbol or function name to inspect hover context for
+    pub symbol: String,
+
+    /// Workspace path (defaults to current directory)
+    pub path: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ContextArgs {
+    /// Symbol or function name to inspect full consolidated context for
+    pub symbol: String,
+
+    /// Workspace path (defaults to current directory)
+    pub path: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -352,6 +430,47 @@ pub struct FileArgs {
     /// Include exact source code implementation block
     #[arg(short = 'b', long = "body")]
     pub body: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct InitArgs {
+    /// Workspace or crate path to initialize (defaults to current directory)
+    pub path: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct MemoryArgs {
+    #[command(subcommand)]
+    pub action: MemoryAction,
+}
+
+#[derive(clap::Subcommand, Debug, Clone)]
+pub enum MemoryAction {
+    /// Retrieve memory note by key
+    Get {
+        /// Memory key (e.g. 'workspace:blueprint', 'auth:flow')
+        key: String,
+    },
+    /// Store or update memory note
+    Set {
+        /// Memory key
+        key: String,
+        /// Category (e.g. 'architecture', 'decision', 'gotcha')
+        #[arg(short, long, default_value = "general")]
+        category: String,
+        /// Content text to store
+        content: String,
+    },
+    /// List all memory keys in .cratemd.db
+    List,
+    /// Search memory notes and context with SQLite FTS5
+    Search {
+        /// Full-text query
+        query: String,
+        /// Maximum results to return
+        #[arg(short, long, default_value = "10")]
+        limit: usize,
+    },
 }
 
 #[derive(Args, Debug, Clone)]

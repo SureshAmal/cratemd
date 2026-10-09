@@ -6,11 +6,16 @@ use serde_json::{json, Value};
 use crate::analyzer::CrateAnalyzer;
 use crate::audit_cmd::DependencyAuditor;
 use crate::cache::CacheManager;
+use crate::calls_cmd::CallsFinder;
+use crate::context_cmd::PipelinedContextFinder;
 use crate::cross_search::{CrossSearcher, FindArgs};
+use crate::db::ProjectDb;
+use crate::def_cmd::DefFinder;
 use crate::deps_cmd::DepsInspector;
 use crate::docgen::DocGenerator;
 use crate::features_cmd::FeaturesInspector;
 use crate::file_cmd::FileAnalyzer;
+use crate::hover_cmd::HoverInspector;
 use crate::impls_cmd::ImplsQuery;
 use crate::locator::CrateLocator;
 use crate::model::CrateIndex;
@@ -467,6 +472,164 @@ fn get_tool_definitions() -> Vec<Value> {
                 "required": ["crate_name"]
             }
         }),
+        json!({
+            "name": "cratemd_def",
+            "description": "Go to definition of a symbol across the workspace and dependencies (returns file path, lines, signature, doc, and code snippet)",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Symbol name or path (e.g. 'CrateLocator', 'WorkspaceInfo::load', or 'analyze')"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Workspace root directory (defaults to current directory)"
+                    },
+                    "exact": {
+                        "type": "boolean",
+                        "description": "Require exact name match (default false)"
+                    },
+                    "snippet": {
+                        "type": "boolean",
+                        "description": "Include exact source code implementation block (default true)"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum definitions to return (default 10)"
+                    }
+                },
+                "required": ["symbol"]
+            }
+        }),
+        json!({
+            "name": "cratemd_calls",
+            "description": "Call hierarchy: trace incoming callers (who calls this function) and outgoing calls (callees inside this function)",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "function": {
+                        "type": "string",
+                        "description": "Function or method name to trace"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Workspace root directory (defaults to current directory)"
+                    },
+                    "incoming": {
+                        "type": "boolean",
+                        "description": "Trace incoming callers only"
+                    },
+                    "outgoing": {
+                        "type": "boolean",
+                        "description": "Trace outgoing calls only"
+                    }
+                },
+                "required": ["function"]
+            }
+        }),
+        json!({
+            "name": "cratemd_hover",
+            "description": "Hover card: instant signature, docstring, visibility, and exact file location for any symbol",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Symbol or function name to hover over"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Workspace root directory (defaults to current directory)"
+                    }
+                },
+                "required": ["symbol"]
+            }
+        }),
+        json!({
+            "name": "cratemd_context",
+            "description": "Consolidated code context in a single pipelined tool call: returns definition, code snippet, callers/callees hierarchy, and key references without multiple roundtrips",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Symbol or function name to get consolidated context for"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Workspace root directory (defaults to current directory)"
+                    }
+                },
+                "required": ["symbol"]
+            }
+        }),
+        json!({
+            "name": "cratemd_memory_get",
+            "description": "Read persistent project context note or blueprint from .cratemd.db memory by key",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Memory key (e.g. 'workspace:blueprint', 'crate:cratemd', or custom agent keys)"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Workspace root directory (defaults to current directory)"
+                    }
+                },
+                "required": ["key"]
+            }
+        }),
+        json!({
+            "name": "cratemd_memory_set",
+            "description": "Store or update a persistent project context note in .cratemd.db memory for all local agents to share",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Memory key (e.g. 'auth:flow', 'database:schema', 'task:findings')"
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Category (e.g. 'architecture', 'decision', 'gotcha', 'findings')"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Content text or markdown to store"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Workspace root directory (defaults to current directory)"
+                    }
+                },
+                "required": ["key", "content"]
+            }
+        }),
+        json!({
+            "name": "cratemd_memory_search",
+            "description": "Full-text search (SQLite FTS5) across stored project notes, blueprints, and agent memories in .cratemd.db",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query terms"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return (default 10)"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Workspace root directory (defaults to current directory)"
+                    }
+                },
+                "required": ["query"]
+            }
+        }),
     ]
 }
 
@@ -820,6 +983,138 @@ fn execute_tool(name: &str, args: &Value) -> (String, bool) {
                     (out, false)
                 }
                 Err(err) => (format!("Error locating crate '{}': {:#}", crate_name, err), true),
+            }
+        }
+
+        "cratemd_def" => {
+            let symbol = match args.get("symbol").and_then(|s| s.as_str()) {
+                Some(s) => s,
+                None => return ("Missing 'symbol' argument".to_string(), true),
+            };
+            let path_opt = args.get("path").and_then(|p| p.as_str()).map(Path::new);
+            let exact = args.get("exact").and_then(|e| e.as_bool()).unwrap_or(false);
+            let snippet = args.get("snippet").and_then(|s| s.as_bool()).unwrap_or(true);
+            let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(10) as usize;
+
+            match DefFinder::find(symbol, path_opt, exact, snippet, limit) {
+                Ok(report) => (DefFinder::render_markdown(&report), false),
+                Err(err) => (format!("Error finding definition for '{}': {:#}", symbol, err), true),
+            }
+        }
+
+        "cratemd_calls" => {
+            let function = match args.get("function").and_then(|f| f.as_str()) {
+                Some(f) => f,
+                None => return ("Missing 'function' argument".to_string(), true),
+            };
+            let path_opt = args.get("path").and_then(|p| p.as_str()).map(Path::new);
+            let incoming = args.get("incoming").and_then(|i| i.as_bool()).unwrap_or(false);
+            let outgoing = args.get("outgoing").and_then(|o| o.as_bool()).unwrap_or(false);
+
+            match CallsFinder::find(function, path_opt, incoming, outgoing) {
+                Ok(report) => (CallsFinder::render_markdown(&report), false),
+                Err(err) => (format!("Error analyzing call hierarchy for '{}': {:#}", function, err), true),
+            }
+        }
+
+        "cratemd_hover" => {
+            let symbol = match args.get("symbol").and_then(|s| s.as_str()) {
+                Some(s) => s,
+                None => return ("Missing 'symbol' argument".to_string(), true),
+            };
+            let path_opt = args.get("path").and_then(|p| p.as_str()).map(Path::new);
+
+            match HoverInspector::hover(symbol, path_opt) {
+                Ok(Some(info)) => (HoverInspector::render_markdown(&info), false),
+                Ok(None) => (format!("No hover information found for `{}`", symbol), false),
+                Err(err) => (format!("Error getting hover information for '{}': {:#}", symbol, err), true),
+            }
+        }
+
+        "cratemd_context" => {
+            let symbol = match args.get("symbol").and_then(|s| s.as_str()) {
+                Some(s) => s,
+                None => return ("Missing 'symbol' argument".to_string(), true),
+            };
+            let path_opt = args.get("path").and_then(|p| p.as_str()).map(Path::new);
+
+            match PipelinedContextFinder::inspect(symbol, path_opt) {
+                Ok(report) => (PipelinedContextFinder::render_markdown(&report), false),
+                Err(err) => (format!("Error generating consolidated context for '{}': {:#}", symbol, err), true),
+            }
+        }
+
+        "cratemd_memory_get" => {
+            let key = match args.get("key").and_then(|k| k.as_str()) {
+                Some(k) => k,
+                None => return ("Missing 'key' argument".to_string(), true),
+            };
+            let path_opt = args.get("path").and_then(|p| p.as_str()).map(Path::new);
+
+            match ProjectDb::open(path_opt) {
+                Ok(db) => match db.get_memory(key) {
+                    Ok(Some(mem)) => {
+                        let out = format!("# Memory: `{}` (Category: `{}`)\n*Updated: {}*\n\n{}", mem.key, mem.category, mem.updated_at, mem.content);
+                        (out, false)
+                    }
+                    Ok(None) => (format!("No memory entry found for key `{}`", key), false),
+                    Err(err) => (format!("Error retrieving memory `{}`: {:#}", key, err), true),
+                },
+                Err(err) => (format!("Error opening .cratemd.db: {:#}", err), true),
+            }
+        }
+
+        "cratemd_memory_set" => {
+            let key = match args.get("key").and_then(|k| k.as_str()) {
+                Some(k) => k,
+                None => return ("Missing 'key' argument".to_string(), true),
+            };
+            let content = match args.get("content").and_then(|c| c.as_str()) {
+                Some(c) => c,
+                None => return ("Missing 'content' argument".to_string(), true),
+            };
+            let category = args.get("category").and_then(|c| c.as_str()).unwrap_or("general");
+            let path_opt = args.get("path").and_then(|p| p.as_str()).map(Path::new);
+
+            match ProjectDb::open(path_opt) {
+                Ok(db) => match db.set_memory(key, category, content) {
+                    Ok(()) => (format!("Successfully stored memory note `{}` under category `{}`", key, category), false),
+                    Err(err) => (format!("Error saving memory note `{}`: {:#}", key, err), true),
+                },
+                Err(err) => (format!("Error opening .cratemd.db: {:#}", err), true),
+            }
+        }
+
+        "cratemd_memory_search" => {
+            let query = match args.get("query").and_then(|q| q.as_str()) {
+                Some(q) => q,
+                None => return ("Missing 'query' argument".to_string(), true),
+            };
+            let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(10) as usize;
+            let path_opt = args.get("path").and_then(|p| p.as_str()).map(Path::new);
+
+            match ProjectDb::open(path_opt) {
+                Ok(db) => match db.search_memory(query, limit) {
+                    Ok(results) => {
+                        if results.is_empty() {
+                            (format!("No memory notes matching query `{}`", query), false)
+                        } else {
+                            let mut out = format!("# Memory Search: `{}` ({} results)\n\n", query, results.len());
+                            for r in results {
+                                out.push_str(&format!("## `{}` [{}]\n*Updated: {}*\n\n", r.key, r.category, r.updated_at));
+                                let snippet: String = r.content.lines().take(5).collect::<Vec<_>>().join("\n");
+                                out.push_str(&snippet);
+                                if r.content.lines().count() > 5 {
+                                    out.push_str("\n*... (more content)*");
+                                }
+                                out.push_str("\n\n---\n\n");
+                            }
+                            (out, false)
+                        }
+                    }
+                    Err(err) => (format!("Error searching memory: {:#}", err), true),
+                },
+                Err(err) => (format!("Error opening .cratemd.db: {:#}", err), true),
             }
         }
 

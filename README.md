@@ -73,14 +73,61 @@ Add `cratemd` to your client's MCP server configuration:
 
 ## Quick Start for LLMs & Developers
 
-### 1. Multi-Crate Workspace Architecture
-Get the blueprint of an entire workspace and inter-crate dependency relationships:
+### 1. Multi-Crate Workspace Architecture & Visual Graphs
+Get the blueprint of an entire workspace, inter-crate dependency relationships, or Mermaid visual diagrams:
 ```bash
 cratemd workspace
 cratemd workspace /path/to/project
+
+# Render Mermaid diagram directly for visual agents & markdown preview
+cratemd workspace --mermaid
 ```
 
-### 2. Unified Search Across Workspace & Dependencies
+### 2. LSP-Grade "Go to Definition" & Source Jumping
+Jump directly to the definition of any symbol across workspace crates with exact start/end line numbers, visibility, and source snippets:
+```bash
+cratemd def CrateLocator
+cratemd def WorkspaceInfo::load
+cratemd def CrateLocator -s     # Include source implementation snippet
+cratemd def locate --exact       # Match exact symbol name
+```
+
+### 3. LSP-Grade Call Hierarchy (Callers & Callees)
+Trace where functions are called (incoming) and what they call (outgoing) across the codebase without loading entire files:
+```bash
+cratemd calls locate            # Full incoming callers & outgoing calls
+cratemd calls locate -i         # Callers only (who invokes locate?)
+cratemd calls locate -o         # Callees only (what does locate call?)
+```
+
+### 4. Semantic Hover Card (~50 tokens)
+Quickly inspect signature, visibility, file location, and docstrings in a token-optimized card:
+```bash
+cratemd hover locate
+cratemd hover CrateLocator
+```
+
+### 5. Consolidated Pipelined Context (Zero-Roundtrip LLM Agent Tool)
+Get definition, code snippet, callers/callees hierarchy, and workspace references in a single pipelined tool call to save roundtrips and token budget:
+```bash
+cratemd context CrateLocator::locate
+cratemd context WorkspaceInfo
+```
+
+### 6. Project Context Database & Agent Memory (.cratemd.db)
+Initialize an offline SQLite database with full-text search (FTS5) to store workspace architecture blueprints, crate cheat sheets, and agent memory notes so LLMs never have to re-read the same functions:
+```bash
+# Initialize and index workspace architecture into .cratemd.db
+cratemd init
+
+# Read, write, and search persistent agent memory notes
+cratemd memory list
+cratemd memory get workspace:blueprint
+cratemd memory set "auth:tokens" --category "security" "JWT tokens expire in 15 minutes, refresh via /api/refresh"
+cratemd memory search "JWT refresh"
+```
+
+### 7. Unified Search Across Workspace & Dependencies
 Search for functions, methods, or structs across local workspace crates and external dependencies at once:
 ```bash
 # Search across workspace members and external dependencies
@@ -96,14 +143,14 @@ cratemd find --returns Result
 cratemd find --takes TcpStream
 ```
 
-### 3. Dependency Inventory
+### 8. Dependency Inventory
 Check all external dependencies, resolved versions from Cargo.lock, and offline availability:
 ```bash
 cratemd deps
 cratemd deps /path/to/project
 ```
 
-### 4. Ultra-Condensed Cheat Sheet (~500 tokens)
+### 9. Ultra-Condensed Cheat Sheet (~500 tokens)
 Get an immediate high-density summary of key structs, enums, traits, and functions:
 ```bash
 cratemd cheat serde

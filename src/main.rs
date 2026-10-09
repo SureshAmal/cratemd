@@ -3,13 +3,18 @@
 mod analyzer;
 mod audit_cmd;
 mod cache;
+mod calls_cmd;
 mod cli;
+mod context_cmd;
 mod cross_search;
 mod ctags_gen;
+mod db;
+mod def_cmd;
 mod deps_cmd;
 mod docgen;
 mod features_cmd;
 mod file_cmd;
+mod hover_cmd;
 mod impls_cmd;
 mod locator;
 mod mcp;
@@ -29,17 +34,23 @@ use clap::Parser;
 use analyzer::{clean_rust_syntax, CrateAnalyzer};
 use audit_cmd::DependencyAuditor;
 use cache::CacheManager;
+use calls_cmd::CallsFinder;
 use cli::{
-    AuditArgs, CheatArgs, Cli, Commands, CtagsArgs, DepsCliArgs, DocArgs, ExamplesArgs,
-    FeaturesArgs, FileArgs, FindCliArgs, ImplsArgs, ListArgs, LocateArgs, McpArgs, OutlineArgs,
-    RefsArgs, SearchArgs, TokensCliArgs, TreesitterArgs, ViewArgs, WarmArgs, WorkspaceCliArgs,
+    AuditArgs, CallsArgs, CheatArgs, Cli, Commands, ContextArgs, CtagsArgs, DefArgs, DepsCliArgs, DocArgs,
+    ExamplesArgs, FeaturesArgs, FileArgs, FindCliArgs, HoverArgs, ImplsArgs, InitArgs, ListArgs, LocateArgs,
+    McpArgs, MemoryAction, MemoryArgs, OutlineArgs, RefsArgs, SearchArgs, TokensCliArgs, TreesitterArgs,
+    ViewArgs, WarmArgs, WorkspaceCliArgs,
 };
+use context_cmd::PipelinedContextFinder;
+use db::ProjectDb;
 use cross_search::{CrossSearcher, FindArgs};
 use ctags_gen::CtagsGenerator;
+use def_cmd::DefFinder;
 use deps_cmd::DepsInspector;
 use docgen::DocGenerator;
 use features_cmd::FeaturesInspector;
 use file_cmd::FileAnalyzer;
+use hover_cmd::HoverInspector;
 use impls_cmd::ImplsQuery;
 use locator::CrateLocator;
 use mcp::McpServer;
@@ -102,9 +113,15 @@ fn run() -> Result<()> {
         Some(Commands::Features(args)) => handle_features(args, &cli, refresh, no_cache),
         Some(Commands::Impls(args)) => handle_impls(args, &cli, refresh, no_cache),
         Some(Commands::Refs(args)) => handle_refs(args, &cli),
+        Some(Commands::Def(args)) => handle_def(args, &cli),
+        Some(Commands::Calls(args)) => handle_calls(args, &cli),
+        Some(Commands::Hover(args)) => handle_hover(args, &cli),
+        Some(Commands::Context(args)) => handle_context(args, &cli),
         Some(Commands::Audit(args)) => handle_audit(args, &cli),
         Some(Commands::Warm(args)) => handle_warm(args, &cli, refresh),
         Some(Commands::File(args)) => handle_file(args, &cli),
+        Some(Commands::Init(args)) => handle_init(args, &cli),
+        Some(Commands::Memory(args)) => handle_memory(args, &cli),
         Some(Commands::Mcp(args)) => handle_mcp(args),
         None => {
             if let Some(crate_name) = cli.crate_name.clone() {
@@ -120,7 +137,7 @@ fn run() -> Result<()> {
                     && let Some(ws_root) = WorkspaceInfo::find_root(target_path)
                         && let Ok(ws) = WorkspaceInfo::load(&ws_root)
                             && ws.members.len() > 1 {
-                                return handle_workspace(WorkspaceCliArgs { path: Some(ws_root) }, &cli);
+                                return handle_workspace(WorkspaceCliArgs { path: Some(ws_root), mermaid: false }, &cli);
                             }
 
                 // Default action when just crate name is provided: generate LLM doc
@@ -141,7 +158,7 @@ fn run() -> Result<()> {
                 if let Some(ws_root) = WorkspaceInfo::find_root(&cwd) {
                     if let Ok(ws) = WorkspaceInfo::load(&ws_root) {
                         if ws.members.len() > 1 {
-                            return handle_workspace(WorkspaceCliArgs { path: Some(ws_root) }, &cli);
+                            return handle_workspace(WorkspaceCliArgs { path: Some(ws_root), mermaid: false }, &cli);
                         } else if let Some(single) = ws.members.first() {
                             return handle_cheat(CheatArgs { crate_name: single.abs_path.to_string_lossy().to_string() }, &cli, refresh, no_cache);
                         }
@@ -570,6 +587,11 @@ fn handle_workspace(args: WorkspaceCliArgs, cli: &Cli) -> Result<()> {
         return Ok(());
     }
 
+    if args.mermaid {
+        print_output(ws.render_mermaid(), cli);
+        return Ok(());
+    }
+
     let blueprint = ws.render_blueprint();
     print_output(blueprint, cli);
     Ok(())
@@ -701,6 +723,63 @@ fn handle_refs(args: RefsArgs, cli: &Cli) -> Result<()> {
     Ok(())
 }
 
+fn handle_def(args: DefArgs, cli: &Cli) -> Result<()> {
+    let report = DefFinder::find(
+        &args.symbol,
+        args.path.as_deref(),
+        args.exact,
+        args.snippet,
+        args.limit,
+    )?;
+
+    if cli.json {
+        print_output(serde_json::to_string_pretty(&report)?, cli);
+    } else {
+        print_output(DefFinder::render_markdown(&report), cli);
+    }
+    Ok(())
+}
+
+fn handle_calls(args: CallsArgs, cli: &Cli) -> Result<()> {
+    let report = CallsFinder::find(
+        &args.function,
+        args.path.as_deref(),
+        args.incoming,
+        args.outgoing,
+    )?;
+
+    if cli.json {
+        print_output(serde_json::to_string_pretty(&report)?, cli);
+    } else {
+        print_output(CallsFinder::render_markdown(&report), cli);
+    }
+    Ok(())
+}
+
+fn handle_hover(args: HoverArgs, cli: &Cli) -> Result<()> {
+    let info = HoverInspector::hover(&args.symbol, args.path.as_deref())?;
+
+    if cli.json {
+        print_output(serde_json::to_string_pretty(&info)?, cli);
+    } else if let Some(ref h) = info {
+        print_output(HoverInspector::render_markdown(h), cli);
+    } else {
+        print_output(format!("No hover information found for `{}`\n", args.symbol), cli);
+    }
+    Ok(())
+}
+
+fn handle_context(args: ContextArgs, cli: &Cli) -> Result<()> {
+    let report = PipelinedContextFinder::inspect(&args.symbol, args.path.as_deref())?;
+
+    if cli.json {
+        print_output(serde_json::to_string_pretty(&report)?, cli);
+    } else {
+        print_output(PipelinedContextFinder::render_markdown(&report), cli);
+    }
+    Ok(())
+}
+
 fn handle_audit(args: AuditArgs, cli: &Cli) -> Result<()> {
     let report = DependencyAuditor::audit(args.target.as_deref())?;
     if cli.json {
@@ -737,6 +816,100 @@ fn handle_file(args: FileArgs, cli: &Cli) -> Result<()> {
         print_output(report.render_symbol(sym, args.body), cli);
     } else {
         print_output(report.render_ascii(), cli);
+    }
+    Ok(())
+}
+
+fn handle_init(args: InitArgs, cli: &Cli) -> Result<()> {
+    let target = match args.path {
+        Some(p) => p,
+        None => std::env::current_dir()?,
+    };
+
+    let db = ProjectDb::open(Some(&target))?;
+    let summary = db.init_project(&target)?;
+
+    if cli.json {
+        let json_val = serde_json::json!({
+            "status": "success",
+            "db_path": db.db_path.to_string_lossy(),
+            "summary": summary.trim(),
+        });
+        print_output(serde_json::to_string_pretty(&json_val)?, cli);
+    } else {
+        let mut out = format!("Initialized project context database at `{}`\n", db.db_path.display());
+        out.push_str(&summary);
+        print_output(out, cli);
+    }
+    Ok(())
+}
+
+fn handle_memory(args: MemoryArgs, cli: &Cli) -> Result<()> {
+    let db = ProjectDb::open(None)?;
+
+    match args.action {
+        MemoryAction::Get { key } => {
+            let mem = db.get_memory(&key)?;
+            if cli.json {
+                print_output(serde_json::to_string_pretty(&mem)?, cli);
+            } else if let Some(m) = mem {
+                let mut out = format!("# Memory: `{}` (Category: `{}`)\n*Updated: {}*\n\n", m.key, m.category, m.updated_at);
+                out.push_str(&m.content);
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                print_output(out, cli);
+            } else {
+                print_output(format!("No memory entry found for key `{}`\n", key), cli);
+            }
+        }
+        MemoryAction::Set { key, category, content } => {
+            db.set_memory(&key, &category, &content)?;
+            if cli.json {
+                let json_val = serde_json::json!({
+                    "status": "success",
+                    "key": key,
+                    "category": category,
+                });
+                print_output(serde_json::to_string_pretty(&json_val)?, cli);
+            } else {
+                print_output(format!("Stored memory `{}` under category `{}`\n", key, category), cli);
+            }
+        }
+        MemoryAction::List => {
+            let list = db.list_memory()?;
+            if cli.json {
+                print_output(serde_json::to_string_pretty(&list)?, cli);
+            } else if list.is_empty() {
+                print_output("No memory entries stored in .cratemd.db\n".to_string(), cli);
+            } else {
+                let mut out = format!("# Project Memory Entries ({})\n\n", list.len());
+                for (key, cat, updated) in list {
+                    out.push_str(&format!("- `{}` [{}] (updated: {})\n", key, cat, updated));
+                }
+                print_output(out, cli);
+            }
+        }
+        MemoryAction::Search { query, limit } => {
+            let results = db.search_memory(&query, limit)?;
+            if cli.json {
+                print_output(serde_json::to_string_pretty(&results)?, cli);
+            } else if results.is_empty() {
+                print_output(format!("No memory matching query `{}`\n", query), cli);
+            } else {
+                let mut out = format!("# Memory Search: `{}` ({} results)\n\n", query, results.len());
+                for r in results {
+                    out.push_str(&format!("## `{}` [{}]\n*Updated: {}*\n\n", r.key, r.category, r.updated_at));
+                    let snippet: String = r.content.lines().take(5).collect::<Vec<_>>().join("\n");
+                    out.push_str(&snippet);
+                    if r.content.lines().count() > 5 {
+                        out.push_str("\n*... (more content)*");
+                    }
+                    out.push_str("\n\n---\n\n");
+                }
+                print_output(out, cli);
+            }
+        }
     }
     Ok(())
 }
