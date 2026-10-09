@@ -45,6 +45,12 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install mold & clang (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mold clang
+
       - name: Run tests
         run: cargo test --release --target ${{ matrix.target }}
 
