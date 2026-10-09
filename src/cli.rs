@@ -436,6 +436,10 @@ pub struct FileArgs {
 pub struct InitArgs {
     /// Workspace or crate path to initialize (defaults to current directory)
     pub path: Option<PathBuf>,
+
+    /// Also index direct dependency crates from local cache
+    #[arg(long)]
+    pub deps: bool,
 }
 
 #[derive(Args, Debug, Clone)]

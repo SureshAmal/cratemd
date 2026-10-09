@@ -3,6 +3,12 @@ name = "cratemd"
 version = "0.0.1"
 edition = "2024"
 
+[workspace]
+members = [
+    ".",
+    "cratemd-viz",
+]
+
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }

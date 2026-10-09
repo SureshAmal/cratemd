@@ -1,30 +1,8 @@
-#![deny(dead_code)]
-
-mod analyzer;
-mod audit_cmd;
-mod cache;
-mod calls_cmd;
-mod cli;
-mod context_cmd;
-mod cross_search;
-mod ctags_gen;
-mod db;
-mod def_cmd;
-mod deps_cmd;
-mod docgen;
-mod features_cmd;
-mod file_cmd;
-mod hover_cmd;
-mod impls_cmd;
-mod locator;
-mod mcp;
-mod model;
-mod refs_cmd;
-mod search;
-mod tokens;
-mod treesitter_gen;
-mod warm_cmd;
-mod workspace;
+use cratemd::{
+    analyzer, audit_cmd, cache, calls_cmd, cli, context_cmd, cross_search, ctags_gen,
+    db, def_cmd, deps_cmd, docgen, features_cmd, file_cmd, hover_cmd, impls_cmd,
+    locator, mcp, model, refs_cmd, search, tokens, treesitter_gen, warm_cmd, workspace,
+};
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -827,7 +805,7 @@ fn handle_init(args: InitArgs, cli: &Cli) -> Result<()> {
     };
 
     let db = ProjectDb::open(Some(&target))?;
-    let summary = db.init_project(&target)?;
+    let summary = db.init_project(&target, args.deps)?;
 
     if cli.json {
         let json_val = serde_json::json!({

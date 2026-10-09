@@ -75,7 +75,7 @@ impl ProjectDb {
     }
 
     /// Initializes project context by scanning the workspace, indexing members, and storing blueprint
-    pub fn init_project(&self, root_dir: &Path) -> Result<String> {
+    pub fn init_project(&self, root_dir: &Path, index_dependencies: bool) -> Result<String> {
         let mut summary = String::new();
 
         // 1. Workspace info
@@ -100,8 +100,85 @@ impl ProjectDb {
                         let cheat = DocGenerator::generate_cheat_sheet(&index);
                         let mem_key = format!("crate:{}", index.info.name);
                         self.set_memory(&mem_key, "cheat_sheet", &cheat)?;
+
+                        // Index structs, enums, and traits for deep visual diving
+                        for sym in &index.symbols {
+                            if matches!(sym.kind, crate::model::SymbolKind::Struct | crate::model::SymbolKind::Enum | crate::model::SymbolKind::Trait) {
+                                let mut sym_doc = format!("# {} `{}`\n\n", sym.kind.as_str(), sym.name);
+                                sym_doc.push_str(&format!("- **Crate:** `{}`\n", index.info.name));
+                                sym_doc.push_str(&format!("- **Module:** `{}`\n", sym.module_path));
+                                sym_doc.push_str(&format!("- **File:** `{}:{}-{}`\n\n", sym.file_path, sym.line_start, sym.line_end));
+                                
+                                sym_doc.push_str("```rust\n");
+                                sym_doc.push_str(&sym.signature);
+                                sym_doc.push_str("\n```\n\n");
+
+                                if !sym.doc.is_empty() {
+                                    sym_doc.push_str("## Documentation\n\n");
+                                    sym_doc.push_str(&sym.doc);
+                                    sym_doc.push_str("\n\n");
+                                }
+
+                                if !sym.methods.is_empty() {
+                                    sym_doc.push_str("## Methods\n\n");
+                                    for m in &sym.methods {
+                                        sym_doc.push_str(&format!("### `{}`\n```rust\n{}\n```\n", m.name, m.signature));
+                                        if !m.doc.is_empty() {
+                                            sym_doc.push_str(&format!("{}\n\n", m.doc));
+                                        }
+                                    }
+                                }
+
+                                if !sym.trait_impls.is_empty() {
+                                    sym_doc.push_str("## Implements Traits\n\n");
+                                    for t in &sym.trait_impls {
+                                        sym_doc.push_str(&format!("- `{}`\n", t));
+                                    }
+                                    sym_doc.push_str("\n");
+                                }
+
+                                let sym_key = format!("symbol:{}::{}", index.info.name, sym.name);
+                                self.set_memory(&sym_key, sym.kind.as_str(), &sym_doc)?;
+                            }
+                        }
                     }
                 }
+            }
+
+            // Index direct external dependencies if requested
+            if index_dependencies {
+                let mut indexed_deps = std::collections::HashSet::new();
+                for member in &ws.members {
+                    for ext_dep in &member.external_deps {
+                        if indexed_deps.insert(ext_dep.clone()) {
+                            if let Ok(info) = CrateLocator::locate(ext_dep) {
+                                let analyzer = CrateAnalyzer::new(info);
+                                if let Ok(index) = analyzer.analyze() {
+                                    let cheat = DocGenerator::generate_cheat_sheet(&index);
+                                    let mem_key = format!("dep:{}", index.info.name);
+                                    let _ = self.set_memory(&mem_key, "dependency", &cheat);
+
+                                    // Index top structs and traits for this dependency
+                                    for sym in &index.symbols {
+                                        if sym.visibility.is_public() && matches!(sym.kind, crate::model::SymbolKind::Struct | crate::model::SymbolKind::Enum | crate::model::SymbolKind::Trait) {
+                                            let mut sym_doc = format!("# {} `{}` (Dependency: `{}`)\n\n", sym.kind.as_str(), sym.name, index.info.name);
+                                            sym_doc.push_str("```rust\n");
+                                            sym_doc.push_str(&sym.signature);
+                                            sym_doc.push_str("\n```\n\n");
+                                            if !sym.doc.is_empty() {
+                                                sym_doc.push_str(&sym.doc);
+                                                sym_doc.push_str("\n\n");
+                                            }
+                                            let sym_key = format!("symbol:{}::{}", index.info.name, sym.name);
+                                            let _ = self.set_memory(&sym_key, "dep_symbol", &sym_doc);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                summary.push_str(&format!("Indexed {} cached dependency crate(s).\n", indexed_deps.len()));
             }
         } else if let Ok(info) = CrateLocator::locate(&root_dir.to_string_lossy()) {
             let analyzer = CrateAnalyzer::new(info);
@@ -117,6 +194,48 @@ impl ProjectDb {
                 "cheat_sheet",
                 &cheat,
             )?;
+
+            // Index structs, enums, and traits
+            for sym in &index.symbols {
+                if matches!(sym.kind, crate::model::SymbolKind::Struct | crate::model::SymbolKind::Enum | crate::model::SymbolKind::Trait) {
+                    let mut sym_doc = format!("# {} `{}`\n\n", sym.kind.as_str(), sym.name);
+                    sym_doc.push_str(&format!("- **Crate:** `{}`\n", index.info.name));
+                    sym_doc.push_str(&format!("- **Module:** `{}`\n", sym.module_path));
+                    sym_doc.push_str(&format!("- **File:** `{}:{}-{}`\n\n", sym.file_path, sym.line_start, sym.line_end));
+                    
+                    sym_doc.push_str("```rust\n");
+                    sym_doc.push_str(&sym.signature);
+                    sym_doc.push_str("\n```\n\n");
+
+                    if !sym.doc.is_empty() {
+                        sym_doc.push_str("## Documentation\n\n");
+                        sym_doc.push_str(&sym.doc);
+                        sym_doc.push_str("\n\n");
+                    }
+
+                    if !sym.methods.is_empty() {
+                        sym_doc.push_str("## Methods\n\n");
+                        for m in &sym.methods {
+                            sym_doc.push_str(&format!("### `{}`\n```rust\n{}\n```\n", m.name, m.signature));
+                            if !m.doc.is_empty() {
+                                sym_doc.push_str(&format!("{}\n\n", m.doc));
+                            }
+                        }
+                    }
+
+                    if !sym.trait_impls.is_empty() {
+                        sym_doc.push_str("## Implements Traits\n\n");
+                        for t in &sym.trait_impls {
+                            sym_doc.push_str(&format!("- `{}`\n", t));
+                        }
+                        sym_doc.push_str("\n");
+                    }
+
+                    let sym_key = format!("symbol:{}::{}", index.info.name, sym.name);
+                    self.set_memory(&sym_key, sym.kind.as_str(), &sym_doc)?;
+                }
+            }
+
             summary.push_str(&format!("Indexed crate '{}' with {} public symbols.\n", index.info.name, index.stats.public_symbols));
         } else {
             summary.push_str("Initialized empty cratemd memory database.\n");

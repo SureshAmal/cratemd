@@ -224,7 +224,38 @@ cratemd file src/analyzer.rs
 cratemd file src/ FileAnalyzer --body
 ```
 
-### 14. Native MCP Server for AI Agents
+### 14. Pipelined Single-Call Context Engine
+Retrieve comprehensive multi-tool intelligence in a single command, reducing token overhead:
+```bash
+cratemd context tokio --include doc,cheat,examples,deps
+```
+
+### 15. Project Memory & Full-Text Search Database
+Maintain persistent context and SQLite FTS5 search across agent sessions:
+```bash
+cratemd init                      # Index workspace & initialize .cratemd.db
+cratemd memory list               # List stored memory notes
+cratemd memory search "router"    # FTS5 full-text search
+cratemd memory set architecture "Axum web service with SQLite backend"
+cratemd memory get architecture
+```
+
+### 16. Graphical OpenGL Visualizer (`cratemd-viz`)
+Interactive 2D physics-driven visualization of crate architecture, dependencies, and evolving agent memory:
+```bash
+# Launch interactive visualizer on current workspace
+cratemd-viz
+
+# Or target specific workspace or database
+cratemd-viz /path/to/project
+```
+Features:
+- OpenGL-accelerated GUI via `eframe` and `glow`.
+- 2D force-directed physics graph via `petgraph` with draggable nodes.
+- Real-time search query bar with live filtering.
+- Side panel Markdown inspector powered by `egui_commonmark`.
+
+### 17. Native MCP Server for AI Agents
 Run `cratemd` as a background Model Context Protocol (MCP) server over stdio:
 ```bash
 cratemd mcp
