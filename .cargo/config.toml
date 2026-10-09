@@ -1,6 +1,6 @@
 [target.x86_64-unknown-linux-gnu]
 linker = "clang"
 rustflags = [
-    "-C", "link-arg=-fuse-ld=/home/suresh/dev/projects/silvapi/mold-2.42.1/bin/mold"
+    "-C", "link-arg=-fuse-ld=/usr/bin/mold"
 ]
 

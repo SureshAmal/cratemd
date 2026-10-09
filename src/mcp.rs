@@ -96,7 +96,7 @@ fn handle_rpc_message(msg: &Value) -> Option<Value> {
                 },
                 "serverInfo": {
                     "name": "cratemd",
-                    "version": "0.1.0"
+                    "version": env!("CARGO_PKG_VERSION")
                 }
             }
         })),
